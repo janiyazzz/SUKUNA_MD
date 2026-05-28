@@ -1,0 +1,28 @@
+{
+  "name": "sukuna-md",
+  "version": "3.0.0",
+  "description": "SUKUNA MD by PASQUA — single-file panel deploy. Paste index.js, fill in SESSION_ID, press Start.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": ["whatsapp", "bot", "baileys", "panel", "pairing", "session-id"],
+  "author": "PASQUA",
+  "license": "MIT",
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.9",
+    "axios": "^1.7.9",
+    "chalk": "^4.1.2",
+    "ffmpeg-static": "^5.2.0",
+    "fs-extra": "^11.2.0",
+    "megajs": "^1.3.6",
+    "moment": "^2.30.1",
+    "pino": "^9.6.0",
+    "play-dl": "^1.9.7",
+    "qrcode-terminal": "^0.12.0",
+    "sharp": "^0.33.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

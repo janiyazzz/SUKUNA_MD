@@ -64,11 +64,14 @@ assets/               # menuvideo.mp4 / menuthumb.jpg
 data/                 # persisted per-group settings, warns, etc.
 sessions/             # Baileys auth state per number (auto-created)
 ```
+*Credits*
+*Creator*   : Pasqua 
+*Endpoints" : Crysonova 
+
+
+please star the repo ⭐ 
 
 ## License 
 
 MIT
-*Credits*
-*Creator* : Pasqua 
-*Endpoints" : Crysonova 
-please star the repo
+

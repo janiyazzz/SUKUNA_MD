@@ -19,7 +19,7 @@ const { buildCaption } = require('../../utils/menuDesigns');
 const { boldItalic } = require('../../utils/styleBox');
 
 const VIDEO_PATH = path.join(__dirname, '..', '..', 'assets', 'menuvideo.mp4');
-const IMAGE_PATH = path.join(__dirname, '..', '..', 'assets', 'menuthumb.jpg');
+const IMAGE_PATH = path.join(__dirname, '..', '..', 'assets', 'menuimage.jpg');
 
 const CHANNEL_JID  = '120363424109748354@newsletter';
 const CHANNEL_NAME = 'Sukuna MD Pasqua tech';

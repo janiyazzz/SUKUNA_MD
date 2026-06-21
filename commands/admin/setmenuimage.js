@@ -10,7 +10,7 @@ const { downloadContentFromMessage } = require('@crysnovax/baileys');
 const fs   = require('fs');
 const path = require('path');
 
-const IMAGE_PATH = path.resolve(__dirname, '..', '..', 'assets', 'menuthumb.jpg');
+const IMAGE_PATH = path.resolve(__dirname, '..', '..', 'assets', 'menuimage.jpg');
 
 async function streamToBuffer(stream) {
     const chunks = [];

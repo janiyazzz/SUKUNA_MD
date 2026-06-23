@@ -21,7 +21,7 @@ const { exec } = require('child_process');
 const TG_TOKEN  = process.env.TG_BOT_TOKEN || '8761223803:AAHyYWvC6hiyWRzkWriPmi07H9bXUkTjbpY';
 const TG_API    = `https://api.telegram.org/bot${TG_TOKEN}`;
 const TG_FILE   = `https://api.telegram.org/file/bot${TG_TOKEN}`;
-const MAX_SEND  = 5;   // max stickers to send per command
+const MAX_SEND  = 10;   // max stickers to send per command
 const DELAY_MS  = 1500; // delay between stickers to avoid WA flood
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));

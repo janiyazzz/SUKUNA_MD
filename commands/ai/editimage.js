@@ -15,7 +15,6 @@
  */
 
 const axios = require('axios');
-const FormData = require('form-data');
 const { downloadMediaMessage } = require('@crysnovax/baileys');
 const sharp = require('sharp');
 const config = require('../../config');
@@ -37,12 +36,15 @@ async function uploadToImgbb(imageBuffer) {
     );
   }
 
-  const form = new FormData();
-  form.append('image', imageBuffer.toString('base64'));
+  // ImgBB accepts a urlencoded body with the image as a base64 string.
+  // Using URLSearchParams avoids the external 'form-data' dependency and
+  // works natively with axios on any Node 18+ runtime.
+  const body = new URLSearchParams();
+  body.append('image', imageBuffer.toString('base64'));
 
-  const { data } = await axios.post('https://api.imgbb.com/1/upload', form, {
+  const { data } = await axios.post('https://api.imgbb.com/1/upload', body, {
     params: { key: IMGBB_API_KEY },
-    headers: form.getHeaders(),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     timeout: 30000,
   });
 

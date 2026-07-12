@@ -1,19 +1,25 @@
 /**
- * .imagine <prompt> — image fetcher / AI generator
+ * .imagine <prompt> — AI image generator
  *
  * Order of providers (first success wins):
- *   1. Unsplash (PRIMARY)  — high-quality real photos matching the prompt
- *   2. lolhuman imagine    — AI image fallback
- *   3. prexzyvilla DALL·E  — AI image fallback
+ *   1. Pollinations (KEYLESS)  — real AI image generation, no API key needed
+ *   2. Unsplash                — real-photo fallback (needs UNSPLASH_ACCESS_KEY)
  *
- * Aliases: .aiimage, .genimage, .create
+ * Aliases: .aiimg, .genimage, .create
  */
 const axios = require('axios');
+const { generateImage } = require('../../utils/smartAI');
 
-const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY ||
-    'e306xjYAc9h7E2BhXf8gACkiykLBTg23KDIad9bqeTk';
+const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY || '';
+
+async function tryPollinations(prompt) {
+    const buf = await generateImage(prompt);
+    if (!buf) return null;
+    return { buf, credit: null, model: 'Pollinations AI (Flux)' };
+}
 
 async function tryUnsplash(prompt) {
+    if (!UNSPLASH_ACCESS_KEY) return null;
     try {
         const { data } = await axios.get('https://api.unsplash.com/photos/random', {
             params: { query: prompt, orientation: 'squarish', count: 1 },
@@ -37,68 +43,29 @@ async function tryUnsplash(prompt) {
     }
 }
 
-async function tryLolhuman(prompt) {
-    try {
-        const url = `https://api.lolhuman.xyz/api/imagine?apikey=free&prompt=${encodeURIComponent(prompt)}`;
-        const res = await axios.get(url, { responseType: 'arraybuffer', timeout: 60000 });
-        const buf = Buffer.from(res.data);
-        if (!buf || buf.length < 1024) return null;
-        return { buf, credit: null, model: 'lolhuman' };
-    } catch (e) {
-        console.error('[imagine] lolhuman failed:', e.message);
-        return null;
-    }
-}
-
-async function tryDalle(prompt) {
-    try {
-        const { data } = await axios.get('https://apis.prexzyvilla.site/ai/dalle', {
-            params: { prompt }, timeout: 60000,
-        });
-        if (!data || data.status !== true) return null;
-        const arr = data.image_url || data.images || data.result;
-        let url = null;
-        if (Array.isArray(arr) && arr.length) {
-            const first = arr[0];
-            url = first?.image?.url || first?.url || (typeof first === 'string' ? first : null);
-        }
-        url = url || (typeof data.result === 'string' ? data.result : null) ||
-                    (typeof data.url === 'string' ? data.url : null);
-        if (!url) return null;
-        const res = await axios.get(url, { responseType: 'arraybuffer', timeout: 60000 });
-        const buf = Buffer.from(res.data);
-        if (!buf || buf.length < 1024) return null;
-        return { buf, credit: null, model: 'DALL·E 3 XL' };
-    } catch (e) {
-        console.error('[imagine] dalle failed:', e.message);
-        return null;
-    }
-}
-
 module.exports = {
     name: 'imagine',
-    aliases: ['aiimage', 'genimage', 'create'],
-    description: 'Fetch / generate an image from text (.imagine <prompt>)',
+    aliases: ['aiimg', 'genimage', 'create'],
+    description: 'Generate an AI image from text (.imagine <prompt>)',
     category: 'ai',
 
     async execute({ sock, msg, from, reply, args }) {
         if (!args.length) {
             return reply(
-                `🎨 *Image Generator*\n\n` +
+                `🎨 *AI Image Generator*\n\n` +
                 `Usage: .imagine <description>\n` +
                 `Example: .imagine a cat wearing a spacesuit on the moon`
             );
         }
 
         const prompt = args.join(' ').trim();
-        await reply('🎨 *Fetching image...* please wait.');
+        await reply('🎨 *Generating image...* please wait.');
 
-        let r = await tryUnsplash(prompt);
-        if (!r) r = await tryLolhuman(prompt);
-        if (!r) r = await tryDalle(prompt);
+        let r = await tryPollinations(prompt);
+        if (!r) r = await tryUnsplash(prompt);
 
         if (!r) {
-            return reply('❌ All image providers failed. Please try a different prompt.');
+            return reply('❌ Image generation is temporarily unavailable. Please try again shortly.');
         }
 
         const creditLine = r.credit ? `\nCredit: ${r.credit}` : '';

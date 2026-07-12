@@ -23,19 +23,35 @@ const PROVIDERS = {
         models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
         prefix: 'gsk_',
         testModel: 'llama-3.1-8b-instant',
+        kind: 'openai',
     },
     openai: {
         url: 'https://api.openai.com/v1/chat/completions',
         models: ['gpt-4o-mini', 'gpt-3.5-turbo'],
         prefix: 'sk-',
         testModel: 'gpt-4o-mini',
+        kind: 'openai',
+    },
+    openrouter: {
+        url: 'https://openrouter.ai/api/v1/chat/completions',
+        models: ['meta-llama/llama-3.3-70b-instruct:free', 'google/gemini-2.0-flash-exp:free'],
+        prefix: 'sk-or-',
+        testModel: 'meta-llama/llama-3.3-70b-instruct:free',
+        kind: 'openai',
+    },
+    gemini: {
+        url: 'https://generativelanguage.googleapis.com/v1beta',
+        models: ['gemini-1.5-flash', 'gemini-1.5-flash-8b'],
+        prefix: 'AIza',
+        testModel: 'gemini-1.5-flash',
+        kind: 'gemini',
     },
 };
 
 const DEFAULT_BLOCK =
 `// ===== BEGIN AI CONFIG (managed by .chatbotapi) =====
 const AI_PROVIDER = 'groq';
-const AI_API_KEY  = process.env.GROQ_API_KEY || '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';
+const AI_API_KEY  = process.env.GROQ_API_KEY || '';
 const AI_URL      = 'https://api.groq.com/openai/v1/chat/completions';
 const AI_MODELS   = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
 // ===== END AI CONFIG =====`;
@@ -48,6 +64,18 @@ function mask(key) {
 async function testKey(provider, key) {
     const cfg = PROVIDERS[provider];
     try {
+        if (cfg.kind === 'gemini') {
+            const url = `${cfg.url}/models/${cfg.testModel}:generateContent?key=${key}`;
+            const { status, data } = await axios.post(url, {
+                contents: [{ role: 'user', parts: [{ text: 'ping' }] }],
+            }, {
+                timeout: 15000,
+                headers: { 'Content-Type': 'application/json' },
+                validateStatus: () => true,
+            });
+            if (status >= 200 && status < 300) return { ok: true };
+            return { ok: false, error: data?.error?.message || `HTTP ${status}` };
+        }
         const { status, data } = await axios.post(cfg.url, {
             model: cfg.testModel,
             messages: [{ role: 'user', content: 'ping' }],
@@ -106,16 +134,22 @@ module.exports = {
 
         if (!sub || sub === 'status' || sub === 'help') {
             const cur = readCurrent();
+            let chain = [];
+            try { chain = require('../../utils/smartAI').getProviderInfo().chain || []; } catch (_) {}
             return reply(
                 '🔑 *Chatbot API*\n\n' +
-                `Provider: *${cur.provider}*\n` +
-                `Key:      \`${mask(cur.key)}\`\n\n` +
+                `Preferred provider: *${cur.provider}*\n` +
+                `Key:      \`${mask(cur.key)}\`\n` +
+                `Active fallback chain: ${chain.length ? chain.join(' → ') : 'pollinations'}\n\n` +
                 '*Usage:*\n' +
-                '• `.chatbotapi groq <key>`   — set a Groq key (gsk_...)\n' +
-                '• `.chatbotapi openai <key>` — set an OpenAI key (sk-...)\n' +
-                '• `.chatbotapi status`        — show active key\n' +
-                '• `.chatbotapi reset`         — restore default Groq key\n\n' +
-                '_Use this when the current API key gets revoked or hits its rate limit._'
+                '• `.chatbotapi groq <key>`       — Groq key (gsk_...)\n' +
+                '• `.chatbotapi openai <key>`     — OpenAI key (sk-...)\n' +
+                '• `.chatbotapi openrouter <key>` — OpenRouter key (sk-or-...)\n' +
+                '• `.chatbotapi gemini <key>`     — Google Gemini key (AIza...)\n' +
+                '• `.chatbotapi status`           — show active chain\n' +
+                '• `.chatbotapi reset`            — restore default\n\n' +
+                '_The bot also auto-uses any provider key set in the environment, ' +
+                'and always falls back to a keyless AI so it never goes silent._'
             );
         }
 
@@ -128,7 +162,7 @@ module.exports = {
             }
         }
 
-        if (sub === 'groq' || sub === 'openai') {
+        if (PROVIDERS[sub]) {
             const provider = sub;
             const key = (args[1] || '').trim();
             if (!key) return reply(`❌ Usage: \`.chatbotapi ${provider} <key>\``);

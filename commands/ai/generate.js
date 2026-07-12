@@ -1,22 +1,19 @@
 /**
- * .generate <prompt> — image fetcher / AI generator
+ * .generate <prompt> — AI image generator
  *
  * Order of providers (first success wins):
- *   1. Unsplash (PRIMARY)  — high-quality real photos matching the prompt
- *   2. prexzyvilla DALL·E  — AI image fallback
- *   3. prexzyvilla Realistic — AI image fallback
+ *   1. Pollinations (KEYLESS)  — real AI image generation, no API key needed
+ *   2. Unsplash                — real-photo fallback (needs UNSPLASH_ACCESS_KEY)
  *
  * Aliases: .gen, .img
  */
 const axios = require('axios');
+const { generateImage } = require('../../utils/smartAI');
 
-const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY ||
-    'e306xjYAc9h7E2BhXf8gACkiykLBTg23KDIad9bqeTk';
-
-const DALLE     = 'https://apis.prexzyvilla.site/ai/dalle';
-const REALISTIC = 'https://apis.prexzyvilla.site/ai/realistic';
+const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY || '';
 
 async function fetchFromUnsplash(prompt) {
+    if (!UNSPLASH_ACCESS_KEY) return null;
     try {
         const { data } = await axios.get('https://api.unsplash.com/photos/random', {
             params: { query: prompt, orientation: 'squarish', count: 1 },
@@ -26,40 +23,12 @@ async function fetchFromUnsplash(prompt) {
         const item = Array.isArray(data) ? data[0] : data;
         const url  = item?.urls?.regular || item?.urls?.full || item?.urls?.small;
         if (!url) return null;
-        return { url, credit: item?.user?.name ? `Photo by ${item.user.name} on Unsplash` : 'Unsplash' };
-    } catch (e) {
-        console.error('[generate] Unsplash failed:', e.message);
-        return null;
-    }
-}
-
-async function fetchFromPrexzyvilla(endpoint, prompt) {
-    try {
-        const { data } = await axios.get(endpoint, { params: { prompt }, timeout: 60000 });
-        if (!data || data.status !== true) return null;
-        const arr = data.image_url || data.images || data.result;
-        if (Array.isArray(arr) && arr.length) {
-            const first = arr[0];
-            const url = first?.image?.url || first?.url || (typeof first === 'string' ? first : null);
-            if (url) return { url, credit: null };
-        }
-        if (typeof data.result === 'string') return { url: data.result, credit: null };
-        if (typeof data.url === 'string')    return { url: data.url, credit: null };
-        return null;
-    } catch (e) {
-        console.error(`[generate] ${endpoint} failed:`, e.message);
-        return null;
-    }
-}
-
-async function downloadImage(url) {
-    try {
         const res = await axios.get(url, { responseType: 'arraybuffer', timeout: 60000 });
         const buf = Buffer.from(res.data);
         if (!buf || buf.length < 1024) return null;
-        return buf;
+        return { buf, credit: item?.user?.name ? `Photo by ${item.user.name} on Unsplash` : 'Unsplash', model: 'Unsplash' };
     } catch (e) {
-        console.error('[generate] download failed:', e.message);
+        console.error('[generate] Unsplash failed:', e.message);
         return null;
     }
 }
@@ -67,47 +36,35 @@ async function downloadImage(url) {
 module.exports = {
     name: 'generate',
     aliases: ['gen', 'img'],
-    description: 'Fetch / generate an image from text (.generate <prompt>)',
+    description: 'Generate an AI image from text (.generate <prompt>)',
     category: 'ai',
 
     async execute({ sock, msg, from, reply, args }) {
         if (!args.length) {
             return reply(
-                `🎨 *Image Generator*\n\n` +
+                `🎨 *AI Image Generator*\n\n` +
                 `Usage: .generate <description>\n` +
                 `Example: .generate a cat wearing a spacesuit on the moon`
             );
         }
 
         const prompt = args.join(' ').trim();
-        await reply('🎨 *Fetching image...* please wait.');
+        await reply('🎨 *Generating image...* please wait.');
 
-        let result = await fetchFromUnsplash(prompt);
-        let modelUsed = 'Unsplash';
-
-        if (!result) {
-            result = await fetchFromPrexzyvilla(DALLE, prompt);
-            if (result) modelUsed = 'DALL·E 3 XL';
-        }
-        if (!result) {
-            result = await fetchFromPrexzyvilla(REALISTIC, prompt);
-            if (result) modelUsed = 'Realistic';
-        }
+        let result = null;
+        const buf = await generateImage(prompt);
+        if (buf) result = { buf, credit: null, model: 'Pollinations AI (Flux)' };
+        if (!result) result = await fetchFromUnsplash(prompt);
 
         if (!result) {
-            return reply('❌ All image providers failed. Please try a different prompt.');
-        }
-
-        const buf = await downloadImage(result.url);
-        if (!buf) {
-            return reply('❌ Image could not be downloaded. Try again.');
+            return reply('❌ Image generation is temporarily unavailable. Please try again shortly.');
         }
 
         const creditLine = result.credit ? `\nCredit: ${result.credit}` : '';
         try {
             await sock.sendMessage(from, {
-                image: buf,
-                caption: `🎨 *Image Result*\n\nPrompt: ${prompt}\nSource: ${modelUsed}${creditLine}\n\n> Generated by SUKUNA MD`,
+                image: result.buf,
+                caption: `🎨 *Image Result*\n\nPrompt: ${prompt}\nSource: ${result.model}${creditLine}\n\n> Generated by SUKUNA MD`,
             }, { quoted: msg });
         } catch (err) {
             reply(`❌ Failed to send image: ${err.message}`);

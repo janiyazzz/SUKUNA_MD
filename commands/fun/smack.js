@@ -1,14 +1,10 @@
-module.exports = {
-    name: 'smack',
-    description: 'Smack someone',
-    category: 'fun',
-    async execute({ args, reply, msg }) {
-        const target = (msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0]
-            || msg.message?.extendedTextMessage?.contextInfo?.participant
-            || args.join(' ').trim()
-            || 'them').split('@')[0];
-        const lines = ["{target} got smacked into next week.", "A clean slap for {target}.", "{target} took a clean five-finger discount."];
-        const line = lines[Math.floor(Math.random()*lines.length)];
-        return reply('✋ ' + line.replace('{target}', '@' + target));
-    }
-};
+const { makeAnimeReaction } = require('../../lib/animeReaction');
+module.exports = makeAnimeReaction({
+    name: 'smack', emoji: '✋', verb: 'smacked', selfVerb: 'smacked the air',
+    reaction: 'smack',
+    fallbacks: [
+        'https://media.giphy.com/media/Zau0yrl17uzdK/giphy.gif',
+        'https://media.giphy.com/media/xT0BKiwiVJq5B0XhHG/giphy.gif'
+    ],
+    description: 'Smack someone with an anime GIF'
+});

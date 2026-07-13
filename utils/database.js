@@ -92,6 +92,7 @@ class Database {
             introcardMessage: '',
             introcardTitle: '',
             introcardTheme: 'default',
+            introcardVideo: null,
             mute: false,
             pasquaai: false,
             antiedit: false,

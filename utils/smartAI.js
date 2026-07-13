@@ -22,7 +22,13 @@ const AI_MODELS   = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
 // ===== END AI CONFIG =====
 
 const MAX_TURNS  = 12;
-const TIMEOUT_MS = 25000;
+// Shorter per-attempt timeout so a slow/stalled provider fails fast and the
+// chain moves on to the next one instead of making the user wait.
+const TIMEOUT_MS = 12000;
+
+// Vercel AI Gateway key — accept either the classic AI_GATEWAY_API_KEY or the
+// VERCEL_AI_GATEWAY_KEY that the Vercel project exposes.
+const GATEWAY_KEY = process.env.VERCEL_AI_GATEWAY_KEY || process.env.AI_GATEWAY_API_KEY || '';
 
 /* ------------------------------------------------------------------ *
  * Provider registry
@@ -39,7 +45,7 @@ function openAICompatible({ name, url, key, models }) {
                 model,
                 messages,
                 temperature: 0.8,
-                max_tokens: 1024,
+                max_tokens: 700,
             }, {
                 timeout: TIMEOUT_MS,
                 headers: {
@@ -127,6 +133,16 @@ function buildChain() {
     const chain = [];
     const seen = new Set();
     const add = (p) => { if (p && !seen.has(p.name)) { seen.add(p.name); chain.push(p); } };
+
+    // 0) Vercel AI Gateway FIRST when a key is present — it's the fastest,
+    //    most reliable brain, and a single key unlocks many models. The fast
+    //    8B model is listed first so replies come back quickly.
+    if (GATEWAY_KEY) add(openAICompatible({
+        name: 'gateway',
+        url: 'https://ai-gateway.vercel.sh/v1/chat/completions',
+        key: GATEWAY_KEY,
+        models: ['groq/llama-3.1-8b-instant', 'openai/gpt-4o-mini', 'groq/llama-3.3-70b-versatile'],
+    }));
 
     // 1) The provider explicitly chosen via .chatbotapi (if it has a key).
     if (AI_API_KEY) {

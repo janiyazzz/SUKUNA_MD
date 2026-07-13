@@ -53,39 +53,51 @@ function pairColumns(names, prefix = '▸') {
     return out;
 }
 
-// ── Design: nor (original) ───────────────────────────────────────
+// ── Design: nor (Peak Rail) ──────────────────────────────────────
+// Sharp corner peaks, chevron rail header, and a single straight-line
+// command list (one command per row) inside boxed categories.
 function designNor(ctx) {
     const { userTag, creator, mode, total, uptime, prefix, version,
             sortedCategories, byCategory, CATEGORY_LABELS, boldItalic,
             date, time, status, platform } = ctx;
-    let c = '';
-    c += `╭─❒ ◈ ${boldItalic('SUKUNA MD')} ❒\n`;
-    c += `│ ⛧ User    : ${userTag}\n`;
-    c += `│ ⛧ Creator : ${creator}\n`;
-    c += `│ ⛧ Mode    : ${mode}\n`;
-    c += `│ ⛧ Plugins : ${total}\n`;
-    c += `│ ⛧ Uptime  : ${uptime}\n`;
-    c += `│ ⛧ Prefix  : ${prefix}\n`;
-    c += `│ ⛧ Version : ${version}\n`;
-    c += `│ ⛧ Date    : ${date}\n`;
-    c += `│ ⛧ Time    : ${time}\n`;
-    c += `│ ⛧ Status  : ${status}\n`;
-    c += `│ ⛧ Platform: ${platform}\n`;
-    c += `╰────────────⛧\n\n`;
 
+    const RULE = '━━━━━━━━━━━━━━━━━━';
+    let c = '';
+
+    // Peak header
+    c += `◤${RULE}◥\n`;
+    c += `      ✦ ${boldItalic('SUKUNA MD')} ✦\n`;
+    c += `◣${RULE}◢\n`;
+
+    // Info rail
+    c += ` ▐ User     : ${userTag}\n`;
+    c += ` ▐ Creator  : ${creator}\n`;
+    c += ` ▐ Mode     : ${mode}\n`;
+    c += ` ▐ Plugins  : ${total}\n`;
+    c += ` ▐ Uptime   : ${uptime}\n`;
+    c += ` ▐ Prefix   : ${prefix}\n`;
+    c += ` ▐ Version  : ${version}\n`;
+    c += ` ▐ Date     : ${date}\n`;
+    c += ` ▐ Time     : ${time}\n`;
+    c += ` ▐ Status   : ${status}\n`;
+    c += ` ▐ Platform : ${platform}\n`;
+    c += `${RULE}━━\n\n`;
+
+    // Categories — boxed, one command per line (straight vertical list)
     for (const cat of sortedCategories) {
         const names = byCategory[cat]; if (!names?.length) continue;
         const label = CATEGORY_LABELS[cat] || (cat[0].toUpperCase() + cat.slice(1));
-        c += `╭─❒ ${boldItalic(label)} ❒\n`;
-        const COL_W = 14;
-        for (let i = 0; i < names.length; i += 2) {
-            const L = `▸ ${names[i]}`.padEnd(COL_W, ' ');
-            const R = names[i + 1] ? `▸ ${names[i + 1]}` : '';
-            c += `│ ${L}${R}\n`;
+        c += `┏━ ${boldItalic(label.toUpperCase())} ━┓\n`;
+        for (const name of names) {
+            c += ` ▸ ${name}\n`;
         }
-        c += `╰─⛧\n\n`;
+        c += `┗━━━━━━━━━━━━━━━━┛\n\n`;
     }
-    c += `╭─❒ ${boldItalic('Total')} ❒\n│ ⛧ ${total} commands loaded\n╰─⛧\n`;
+
+    // Footer peak
+    c += `◤${RULE}◥\n`;
+    c += `   ${total} commands loaded\n`;
+    c += `◣${RULE}◢\n`;
     c += `\n> ${boldItalic('Sukuna MD')} · King of Curses · by ${creator}`;
     return c;
 }
@@ -699,7 +711,7 @@ function designChroma(ctx) {
 }
 
 // ── Design: pasqua — PASQUA TECH signature style ──────────────────
-// Inspired by the ⌘ ══〔 〕══ ⌘ ZEE-style aesthetic with ⿻ separators,
+// Inspired by the ⌘ ══�� 〕══ ⌘ ZEE-style aesthetic with ⿻ separators,
 // 𒆜 category headers, and ❏◦ ➫ command listings.
 function designPasqua(ctx) {
     const { userTag, creator, mode, total, uptime, prefix, version,

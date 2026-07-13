@@ -9,15 +9,37 @@
  */
 'use strict';
 
+const fs    = require('fs');
+const path  = require('path');
 const sharp = require('sharp');
 const webp  = require('node-webpmux');
 
 const COLORS = ['#ff2b2b', '#ffd52b', '#2bff6a', '#2b8bff', '#c22bff', '#ff2bd0'];
 const SIZE   = 512;
+const FONT_FAMILY = 'AttpFont';
 
 let _libReady = false;
 async function ensureLib() {
     if (!_libReady) { await webp.Image.initLib(); _libReady = true; }
+}
+
+// Load the bundled font once and embed it (base64) into the SVG. Without this,
+// hosts that lack system fonts render blank text -> "empty" stickers.
+let _fontFace = null;
+function getFontFace() {
+    if (_fontFace !== null) return _fontFace;
+    try {
+        const fontPath = path.join(__dirname, '..', '..', 'assets', 'attp-font.ttf');
+        const b64 = fs.readFileSync(fontPath).toString('base64');
+        _fontFace =
+            `<defs><style type="text/css">@font-face{font-family:'${FONT_FAMILY}';` +
+            `src:url(data:font/ttf;base64,${b64}) format('truetype');` +
+            `font-weight:bold;font-style:normal;}</style></defs>`;
+    } catch (e) {
+        console.error('[attp] font load failed, falling back to system font:', e.message);
+        _fontFace = '';
+    }
+    return _fontFace;
 }
 
 function escapeXml(s) {
@@ -54,12 +76,12 @@ function buildSvg(lines, color) {
     const startY   = (SIZE - totalH) / 2 + fontSize * 0.8;
     const tspans = lines.map((l, i) =>
         `<text x="${SIZE / 2}" y="${startY + i * lineGap}" font-size="${fontSize}" ` +
-        `fill="${color}" text-anchor="middle" font-family="sans-serif" font-weight="bold" ` +
+        `fill="${color}" text-anchor="middle" font-family="'${FONT_FAMILY}',sans-serif" font-weight="bold" ` +
         `stroke="#000000" stroke-width="${Math.max(2, fontSize * 0.04)}" paint-order="stroke">` +
         `${escapeXml(l)}</text>`
     ).join('');
     return Buffer.from(
-        `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}">${tspans}</svg>`
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}">${getFontFace()}${tspans}</svg>`
     );
 }
 

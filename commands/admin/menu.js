@@ -75,7 +75,7 @@ const CATEGORY_ORDER = [
     'ai', 'utility', 'group', 'general', 'unicode', '18plus', 'textmaker',
 ];
 
-// ── Fallback caption (original PASQUA TECH layout) ──
+// ── Fallback caption (Peak Rail — matches the default `nor` design) ──
 function buildFallbackCaption(ctx) {
     const {
         senderNumber, ownerName, prefix, mode, uptime,
@@ -83,36 +83,46 @@ function buildFallbackCaption(ctx) {
         sortedCategories, byCategory, t,
     } = ctx;
 
-    const header =
-`> ┏❐  ⌜ *SUKUNA MD*⌟  ❐ 
-> ┃⭔ user    : @${senderNumber}
-> ┃⭔ owner   : ${ownerName}
-> ┃⭔ prefix  : ${prefix}
-> ┃⭔ mode    : ${mode}
-> ┃⭔ uptime  : ${uptime}
-> ┃⭔ speed   : ultra fast
-> ┃⭔ ram     : ${ramUsed} / ${ramTotal}
-> ┃⭔ cmds    : ${cmdCount}
-> ┃⭔ version : v${version}
-> ┃⭔ date    : ${date}
-> ┃⭔ time    : ${time}
-> ┃⭔ status  : Online ✅
-> ┃⭔ library : @crysnovax/baileys
-> ┃⭔ credits : pasqua tech
-> ┗❐`;
+    const RULE = '━━━━━━━━━━━━━━━━━━';
+    let c = '';
 
-    let body = `\n\n> ┏❐  ⌜ *COMMANDS*⌟  ❐ \n`;
+    // Peak header
+    c += `◤${RULE}◥\n`;
+    c += `      ✦ *SUKUNA MD* ✦\n`;
+    c += `◣${RULE}◢\n`;
+
+    // Info rail
+    c += ` ▐ User     : @${senderNumber}\n`;
+    c += ` ▐ Creator  : ${ownerName}\n`;
+    c += ` ▐ Mode     : ${mode}\n`;
+    c += ` ▐ Plugins  : ${cmdCount}\n`;
+    c += ` ▐ Uptime   : ${uptime}\n`;
+    c += ` ▐ Prefix   : ${prefix}\n`;
+    c += ` ▐ Version  : v${version}\n`;
+    c += ` ▐ Ram      : ${ramUsed} / ${ramTotal}\n`;
+    c += ` ▐ Date     : ${date}\n`;
+    c += ` ▐ Time     : ${time}\n`;
+    c += ` ▐ Status   : Online ✅\n`;
+    c += `${RULE}━━\n\n`;
+
+    // Categories — boxed, one command per line
     for (const cat of sortedCategories) {
         const list = byCategory[cat];
         if (!list || !list.length) continue;
         const tKey = 'cat.' + cat;
         const label = (t && t(tKey) !== tKey) ? t(tKey) : (CATEGORY_LABELS[cat] || cat.toUpperCase());
-        body += `\n\n*━━ ${label} ━━*\n`;
-        for (const n of [...list].sort()) body += `> ❐ ${n}\n`;
+        c += `┏━ ${String(label).toUpperCase()} ━┓\n`;
+        for (const n of [...list].sort()) c += ` ▸ ${n}\n`;
+        c += `┗━━━━━━━━━━━━━━━━┛\n\n`;
     }
-    body += `\n> ┗❐ ┈┈┈┈┈┈┈┈┈┈✧\n> _𝙥𝙖𝙨𝙦𝙪𝙖 𝙢𝙙 · king of curses · ${cmdCount} commands_`;
 
-    return header + body;
+    // Peak footer
+    c += `◤${RULE}◥\n`;
+    c += `   ${cmdCount} commands loaded\n`;
+    c += `◣${RULE}◢\n`;
+    c += `\n> *Sukuna MD* · King of Curses · by ${ownerName}`;
+
+    return c;
 }
 
 module.exports = {

@@ -1,33 +1,113 @@
 /**
- * ATTP Command — Animated text to picture
+ * ATTP — Animated Text To Picture (sticker)
  * Usage: .attp <text>
+ *
+ * Generates the animated sticker LOCALLY with sharp + node-webpmux (no
+ * external API), so it never breaks when a third-party service goes down.
+ * Text is rendered as colour-cycling frames and assembled into an animated
+ * WebP sticker that WhatsApp accepts directly.
  */
+'use strict';
+
+const sharp = require('sharp');
+const webp  = require('node-webpmux');
+
+const COLORS = ['#ff2b2b', '#ffd52b', '#2bff6a', '#2b8bff', '#c22bff', '#ff2bd0'];
+const SIZE   = 512;
+
+let _libReady = false;
+async function ensureLib() {
+    if (!_libReady) { await webp.Image.initLib(); _libReady = true; }
+}
+
+function escapeXml(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+}
+
+// Wrap text into at most `maxLines` lines of roughly `maxChars` characters.
+function wrapText(text, maxChars = 12, maxLines = 3) {
+    const words = text.split(/\s+/).filter(Boolean);
+    const lines = [];
+    let cur = '';
+    for (const w of words) {
+        if (!cur) { cur = w; }
+        else if ((cur + ' ' + w).length <= maxChars) { cur += ' ' + w; }
+        else { lines.push(cur); cur = w; }
+        if (lines.length >= maxLines) break;
+    }
+    if (cur && lines.length < maxLines) lines.push(cur);
+    // Hard-cut anything that is still too long.
+    return lines.slice(0, maxLines).map(l => (l.length > maxChars + 4 ? l.slice(0, maxChars + 3) + '…' : l));
+}
+
+function buildSvg(lines, color) {
+    const longest  = Math.max(...lines.map(l => l.length), 1);
+    // Scale font so the longest line fits inside ~460px of the 512 canvas.
+    const fontSize = Math.max(48, Math.min(150, Math.floor(920 / longest)));
+    const lineGap  = fontSize * 1.15;
+    const totalH   = lineGap * lines.length;
+    const startY   = (SIZE - totalH) / 2 + fontSize * 0.8;
+    const tspans = lines.map((l, i) =>
+        `<text x="${SIZE / 2}" y="${startY + i * lineGap}" font-size="${fontSize}" ` +
+        `fill="${color}" text-anchor="middle" font-family="sans-serif" font-weight="bold" ` +
+        `stroke="#000000" stroke-width="${Math.max(2, fontSize * 0.04)}" paint-order="stroke">` +
+        `${escapeXml(l)}</text>`
+    ).join('');
+    return Buffer.from(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}">${tspans}</svg>`
+    );
+}
+
+async function makeAttpSticker(text) {
+    await ensureLib();
+    const lines  = wrapText(text);
+    const frames = [];
+    for (const color of COLORS) {
+        const svg = buildSvg(lines, color);
+        const buf = await sharp(svg, { density: 150 }).webp({ lossless: true }).toBuffer();
+        frames.push(await webp.Image.generateFrame({ buffer: buf, delay: 130 }));
+    }
+    return webp.Image.save(null, {
+        width: SIZE,
+        height: SIZE,
+        frames,
+        bgColor: [0, 0, 0, 0],
+        loops: 0,
+    });
+}
 
 module.exports = {
     name: 'attp',
     aliases: ['animatedttp', 'text2gif'],
     description: 'Create an animated sticker from text',
     category: 'media',
+
     async execute({ sock, msg, from, reply, args }) {
-        if (!args.length) {
+        const text = (args || []).join(' ').trim();
+        if (!text) {
             return reply(
-                `✨ *Animated Text to Picture*\n\n` +
+                `✨ *Animated Text To Picture*\n\n` +
                 `Usage: .attp <text>\n` +
                 `Example: .attp Hello World`
             );
         }
 
-        const text = args.join(' ');
-        
         try {
-            const encodedText = encodeURIComponent(text);
-            const gifUrl = `https://api.lolhuman.xyz/api/attp?apikey=free&text=${encodedText}`;
-            
-            await sock.sendMessage(from, {
-                sticker: { url: gifUrl }
-            }, { quoted: msg });
+            await sock.sendMessage(from, { react: { text: '⏳', key: msg.key } }).catch(() => {});
+            const sticker = await makeAttpSticker(text);
+            if (!sticker || sticker.length < 200) throw new Error('empty sticker buffer');
+
+            await sock.sendMessage(from, { sticker }, { quoted: msg });
+            await sock.sendMessage(from, { react: { text: '✅', key: msg.key } }).catch(() => {});
         } catch (err) {
-            reply('❌ Failed to create animated text sticker. Please try again.');
+            console.error('[attp] error:', err.message);
+            await sock.sendMessage(from, { react: { text: '❌', key: msg.key } }).catch(() => {});
+            reply('❌ Failed to create animated text sticker. Please try a shorter text.');
         }
-    }
+    },
 };

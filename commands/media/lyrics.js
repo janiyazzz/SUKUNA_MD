@@ -1,21 +1,22 @@
 /**
- * .lyrics <song> [by <artist>] — find song lyrics via Genius API
+ * .lyrics <song> [by <artist>] — find full song lyrics
  *
  * Example: .lyrics lovely by Billie Eilish
  *
- * Genius's documented auth is `Authorization: Bearer <client_access_token>`
- * against https://api.genius.com/search?q=... — confirmed against Genius's
- * own docs/examples. If this still fails, the error block below now logs
- * the actual HTTP status + response body instead of swallowing it, so the
- * real cause (bad token, wrong token type, rate limit, etc.) shows up in
- * your bot's console logs instead of just "search failed".
+ * Robust multi-source strategy:
+ *   1. If the user gave "<title> by <artist>", fetch full lyrics straight
+ *      from lyrics.ovh.
+ *   2. Otherwise (or if that misses) use the Genius search API to resolve
+ *      the best matching title + primary artist, then pull the full lyrics
+ *      from lyrics.ovh for that match.
+ *   3. Fall back to the free lyrist API.
+ * The full lyrics are sent, chunked so they never exceed WhatsApp limits.
  */
 'use strict';
 const axios = require('axios');
 
 const GENIUS_TOKEN = 'oPSxDH9MWnORz8IYQuNhyvGoLxVCJ-ribPXtUuUkPH9qNVryxEhgpiN1L_LPp_jJOWpl9VrFDUBsQBa9jMWi3g';
-
-const MAX_SNIPPET_CHARS = 250;
+const CHUNK = 3500;
 
 function parseQuery(raw) {
     const byMatch = raw.match(/^(.+?)\s+by\s+(.+)$/i);
@@ -23,17 +24,96 @@ function parseQuery(raw) {
     return { title: raw.trim(), artist: '' };
 }
 
-function buildSnippet(text) {
-    if (!text || typeof text !== 'string') return '';
-    const clean = text.replace(/\s+/g, ' ').trim();
-    if (!clean) return '';
-    return clean.length > MAX_SNIPPET_CHARS ? clean.slice(0, MAX_SNIPPET_CHARS).trim() + '…' : clean;
+// lyrics.ovh — returns full lyrics for an exact artist + title.
+async function fromLyricsOvh(artist, title) {
+    if (!artist || !title) return null;
+    try {
+        const r = await axios.get(
+            `https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`,
+            { timeout: 15000, validateStatus: () => true }
+        );
+        const lyr = r.data?.lyrics && String(r.data.lyrics).trim();
+        if (r.status === 200 && lyr && lyr.length > 5) {
+            return { title, artist, lyrics: lyr.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n') };
+        }
+    } catch (e) {
+        console.error('[lyrics] lyrics.ovh failed:', e.code || e.message);
+    }
+    return null;
+}
+
+// Genius search — resolve the best matching title + primary artist.
+async function geniusResolve(query) {
+    try {
+        const r = await axios.get('https://api.genius.com/search', {
+            params: { q: query },
+            headers: { Authorization: `Bearer ${GENIUS_TOKEN}` },
+            timeout: 15000,
+            validateStatus: () => true,
+        });
+        if (r.status !== 200) {
+            console.error(`[lyrics] Genius HTTP ${r.status}:`, JSON.stringify(r.data).slice(0, 200));
+            return null;
+        }
+        const hit = r.data?.response?.hits?.[0]?.result;
+        if (!hit) return null;
+        return {
+            title: hit.title || query,
+            artist: hit.primary_artist?.name || '',
+            url: hit.url || '',
+        };
+    } catch (e) {
+        console.error('[lyrics] Genius request failed:', e.code || e.message);
+        return null;
+    }
+}
+
+// lyrist — free fallback that also returns full lyrics.
+async function fromLyrist(query) {
+    try {
+        const r = await axios.get(`https://lyrist.vercel.app/api/${encodeURIComponent(query)}`,
+            { timeout: 15000, validateStatus: () => true });
+        const lyr = r.data?.lyrics && String(r.data.lyrics).trim();
+        if (r.status === 200 && lyr && lyr.length > 5) {
+            return {
+                title: r.data.title || query,
+                artist: r.data.artist || '',
+                lyrics: lyr.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n'),
+            };
+        }
+    } catch (e) {
+        console.error('[lyrics] lyrist failed:', e.code || e.message);
+    }
+    return null;
+}
+
+async function findLyrics(raw) {
+    const { title, artist } = parseQuery(raw);
+
+    // 1) Direct hit if the user supplied the artist.
+    if (artist) {
+        const direct = await fromLyricsOvh(artist, title);
+        if (direct) return direct;
+    }
+
+    // 2) Resolve via Genius, then pull full lyrics from lyrics.ovh.
+    const resolved = await geniusResolve(raw);
+    if (resolved?.artist) {
+        const viaGenius = await fromLyricsOvh(resolved.artist, resolved.title);
+        if (viaGenius) return { ...viaGenius, url: resolved.url };
+    }
+
+    // 3) Last-resort free API.
+    const lyrist = await fromLyrist(raw);
+    if (lyrist) return lyrist;
+
+    return null;
 }
 
 module.exports = {
     name: 'lyrics',
-    aliases: ['lyric', 'findlyrics', 'song'],
-    description: 'Find song lyrics via Genius',
+    aliases: ['lyric', 'findlyrics'],
+    description: 'Find full song lyrics',
     category: 'media',
     usage: '.lyrics <song> [by <artist>]',
 
@@ -41,35 +121,36 @@ module.exports = {
         const raw = (args || []).join(' ').trim();
         if (!raw) {
             return reply(
-                `🎵 *Lyrics Finder (Genius)*\n\n` +
+                `🎵 *Lyrics Finder*\n\n` +
                 `Usage: .lyrics <song> [by <artist>]\n` +
                 `Example: .lyrics lovely by Billie Eilish`
             );
         }
 
-        const { title, artist } = parseQuery(raw);
-
         try {
             await sock.sendMessage(from, { react: { text: '🔍', key: msg.key } }).catch(() => {});
 
-            const result = await fetchLyricsGenius(raw);
+            const result = await findLyrics(raw);
 
-            if (!result) {
+            if (!result || !result.lyrics) {
                 await sock.sendMessage(from, { react: { text: '❌', key: msg.key } }).catch(() => {});
-                return reply(
-                    `❌ Song not found: *${title}*${artist ? ` by ${artist}` : ''}\n\n` +
-                    `Check the bot console for [lyrics] logs — it now prints the exact ` +
-                    `API status/error so we can see what's actually happening.`
-                );
+                return reply(`❌ Couldn't find lyrics for *${raw}*.\nTry: .lyrics <song> by <artist>`);
             }
 
-            const snippet = buildSnippet(result.preview);
-            const out = `🎵 *${result.title}*\n👤 ${result.artist}\n\n` +
-                (snippet ? `_${snippet}_\n\n` : '') +
-                `🔗 Full lyrics: ${result.url}\n\n` +
-                `> Lyrics © Genius`;
+            const header = `🎵 *${result.title}*\n👤 ${result.artist || 'Unknown Artist'}\n` +
+                (result.url ? `🔗 ${result.url}\n` : '') +
+                `${'─'.repeat(18)}\n\n`;
 
-            await reply(out);
+            const full = header + result.lyrics + `\n\n> Lyrics via lyrics.ovh / Genius`;
+
+            // Chunk so we never exceed WhatsApp's message size limit.
+            if (full.length <= CHUNK) {
+                await reply(full);
+            } else {
+                for (let i = 0; i < full.length; i += CHUNK) {
+                    await sock.sendMessage(from, { text: full.slice(i, i + CHUNK) }, { quoted: msg });
+                }
+            }
             await sock.sendMessage(from, { react: { text: '✅', key: msg.key } }).catch(() => {});
         } catch (err) {
             console.error('[lyrics] unexpected error:', err.message);
@@ -78,43 +159,3 @@ module.exports = {
         }
     },
 };
-
-async function fetchLyricsGenius(query) {
-    try {
-        const res = await axios.get('https://api.genius.com/search', {
-            params: { q: query },
-            headers: { Authorization: `Bearer ${GENIUS_TOKEN}` },
-            timeout: 15000,
-            validateStatus: () => true, // so we can inspect non-2xx ourselves below
-        });
-
-        // Surface the real cause instead of a generic failure.
-        if (res.status !== 200) {
-            console.error(
-                `[lyrics] Genius returned HTTP ${res.status}:`,
-                JSON.stringify(res.data).slice(0, 300)
-            );
-            return null;
-        }
-
-        const hits = res.data?.response?.hits;
-        if (!hits?.length) {
-            console.error('[lyrics] Genius 200 but no hits for query:', query);
-            return null;
-        }
-
-        const hit = hits[0]?.result;
-        if (!hit) return null;
-
-        return {
-            title: hit.title || 'Unknown',
-            artist: hit.primary_artist?.name || 'Unknown Artist',
-            url: hit.url,
-            preview: hit.description?.plain || '',
-        };
-    } catch (err) {
-        // Network-level failure (DNS, timeout, TLS, etc.) vs. an HTTP error.
-        console.error('[lyrics] Genius request failed:', err.code || err.message);
-        return null;
-    }
-}

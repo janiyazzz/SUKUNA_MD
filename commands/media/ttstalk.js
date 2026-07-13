@@ -1,30 +1,44 @@
 /**
  * .ttstalk <username> — get info on a TikTok account
  *
- * Provider: apis.prexzyvilla.site/stalk/ttstalk. Response shape was never
- * confirmed live (every test request 400'd with no visible body), so
- * fields are pulled defensively via a wide list of plausible names rather
- * than assuming one exact shape, following the same pattern already used
- * in commands/media/tiktok.js for this codebase's other TikTok endpoint.
+ * Uses tikwm's user/info endpoint (the same reliable provider used by the
+ * .tiktok downloader in this codebase). Returns profile + stats and the
+ * avatar image when available.
  */
 'use strict';
 const axios = require('axios');
 
-function pick(root, keys) {
-    for (const k of keys) {
-        const v = root?.[k];
-        if (v !== undefined && v !== null && v !== '') return v;
-    }
-    return null;
-}
-
-function formatCount(n) {
-    if (n === null || n === undefined) return null;
+function fmt(n) {
+    if (n === null || n === undefined || n === '') return null;
     const num = typeof n === 'string' ? parseFloat(n.replace(/[^\d.]/g, '')) : n;
     if (!Number.isFinite(num)) return String(n);
+    if (num >= 1_000_000_000) return (num / 1_000_000_000).toFixed(1) + 'B';
     if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M';
     if (num >= 1_000) return (num / 1_000).toFixed(1) + 'K';
     return String(num);
+}
+
+async function stalk(username) {
+    const { data } = await axios.get('https://www.tikwm.com/api/user/info', {
+        params: { unique_id: username },
+        timeout: 30000,
+        validateStatus: () => true,
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+    });
+    if (!data || data.code !== 0 || !data.data) return null;
+    const u = data.data.user || {};
+    const s = data.data.stats || {};
+    return {
+        nickname:  u.nickname || u.uniqueId || username,
+        handle:    u.uniqueId || username,
+        bio:       u.signature || '',
+        verified:  !!u.verified,
+        avatar:    u.avatarLarger || u.avatarMedium || u.avatarThumb || '',
+        followers: s.followerCount,
+        following: s.followingCount,
+        likes:     s.heartCount ?? s.heart,
+        videos:    s.videoCount,
+    };
 }
 
 module.exports = {
@@ -47,42 +61,25 @@ module.exports = {
         try {
             await sock.sendMessage(from, { react: { text: '🔍', key: msg.key } }).catch(() => {});
 
-            const { data } = await axios.get('https://apis.prexzyvilla.site/stalk/ttstalk', {
-                params: { user: username },
-                timeout: 30000,
-                validateStatus: () => true,
-            });
-
-            const root = data?.data || data?.result || data || {};
-
-            const nickname   = pick(root, ['nickname', 'name', 'fullName', 'displayName']);
-            const handle      = pick(root, ['username', 'unique_id', 'uniqueId', 'user']) || username;
-            const bio          = pick(root, ['bio', 'signature', 'desc', 'description']);
-            const followers    = pick(root, ['followers', 'followerCount', 'follower_count', 'fans']);
-            const following    = pick(root, ['following', 'followingCount', 'following_count']);
-            const likes         = pick(root, ['likes', 'heart', 'heartCount', 'likeCount', 'total_favorited']);
-            const videoCount   = pick(root, ['videoCount', 'video_count', 'videos', 'awemeCount']);
-            const verified       = pick(root, ['verified', 'isVerified']);
-            const avatar          = pick(root, ['avatar', 'avatarUrl', 'avatar_url', 'avatarLarger', 'profile_pic']);
-
-            if (!nickname && !followers && !bio) {
+            const info = await stalk(username);
+            if (!info) {
                 await sock.sendMessage(from, { react: { text: '❌', key: msg.key } }).catch(() => {});
-                return reply(`❌ Couldn't find TikTok account *@${username}*. Double-check the username and try again.`);
+                return reply(`❌ Couldn't find TikTok account *@${username}*. Double-check the username.`);
             }
 
             let out = `📱 *TikTok Account*\n\n`;
-            out += `👤 *${nickname || handle}*${verified ? ' ✅' : ''}\n`;
-            out += `🔗 @${handle}\n`;
-            if (bio) out += `📝 ${bio}\n`;
+            out += `👤 *${info.nickname}*${info.verified ? ' ✅' : ''}\n`;
+            out += `🔗 @${info.handle}\n`;
+            if (info.bio) out += `📝 ${info.bio}\n`;
             out += `\n`;
-            if (followers !== null) out += `👥 Followers: *${formatCount(followers)}*\n`;
-            if (following !== null) out += `➡️ Following: *${formatCount(following)}*\n`;
-            if (likes !== null) out += `❤️ Likes: *${formatCount(likes)}*\n`;
-            if (videoCount !== null) out += `🎥 Videos: *${formatCount(videoCount)}*\n`;
+            if (fmt(info.followers) !== null) out += `👥 Followers: *${fmt(info.followers)}*\n`;
+            if (fmt(info.following) !== null) out += `➡️ Following: *${fmt(info.following)}*\n`;
+            if (fmt(info.likes)     !== null) out += `❤️ Likes: *${fmt(info.likes)}*\n`;
+            if (fmt(info.videos)    !== null) out += `🎥 Videos: *${fmt(info.videos)}*\n`;
 
-            if (avatar && typeof avatar === 'string' && /^https?:\/\//.test(avatar)) {
+            if (info.avatar && /^https?:\/\//.test(info.avatar)) {
                 try {
-                    await sock.sendMessage(from, { image: { url: avatar }, caption: out }, { quoted: msg });
+                    await sock.sendMessage(from, { image: { url: info.avatar }, caption: out }, { quoted: msg });
                     await sock.sendMessage(from, { react: { text: '✅', key: msg.key } }).catch(() => {});
                     return;
                 } catch (_) { /* fall through to text-only */ }

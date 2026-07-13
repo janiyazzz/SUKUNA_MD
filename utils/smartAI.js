@@ -18,7 +18,9 @@ const axios = require('axios');
 const AI_PROVIDER = 'groq';
 const AI_API_KEY  = process.env.GROQ_API_KEY || '';
 const AI_URL      = 'https://api.groq.com/openai/v1/chat/completions';
-const AI_MODELS   = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+// Fast 8B model FIRST so replies come back near-instantly; the heavier 70B
+// model is only used as a fallback if the fast one fails.
+const AI_MODELS   = ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile'];
 // ===== END AI CONFIG =====
 
 const MAX_TURNS  = 12;
@@ -134,17 +136,12 @@ function buildChain() {
     const seen = new Set();
     const add = (p) => { if (p && !seen.has(p.name)) { seen.add(p.name); chain.push(p); } };
 
-    // 0) Vercel AI Gateway FIRST when a key is present — it's the fastest,
-    //    most reliable brain, and a single key unlocks many models. The fast
-    //    8B model is listed first so replies come back quickly.
-    if (GATEWAY_KEY) add(openAICompatible({
-        name: 'gateway',
-        url: 'https://ai-gateway.vercel.sh/v1/chat/completions',
-        key: GATEWAY_KEY,
-        models: ['groq/llama-3.1-8b-instant', 'openai/gpt-4o-mini', 'groq/llama-3.3-70b-versatile'],
-    }));
-
     // 1) The provider explicitly chosen via .chatbotapi (if it has a key).
+    //    This is the PRIMARY fast path — Groq's 8B-instant model returns in
+    //    ~1s. We intentionally do NOT put the Vercel AI Gateway first: it
+    //    returns HTTP 403 unless a credit card is on file, and a guaranteed
+    //    failed request at the front of the chain only makes every reply
+    //    slower. The gateway is added lower down as a fallback instead.
     if (AI_API_KEY) {
         if (AI_PROVIDER === 'gemini') {
             add(geminiProvider(AI_API_KEY));
@@ -158,7 +155,7 @@ function buildChain() {
         name: 'groq',
         url: 'https://api.groq.com/openai/v1/chat/completions',
         key: process.env.GROQ_API_KEY,
-        models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
+        models: ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile'],
     }));
     if (process.env.GEMINI_API_KEY) add(geminiProvider(process.env.GEMINI_API_KEY));
     if (process.env.OPENAI_API_KEY) add(openAICompatible({
@@ -173,11 +170,15 @@ function buildChain() {
         key: process.env.OPENROUTER_API_KEY,
         models: ['meta-llama/llama-3.3-70b-instruct:free', 'google/gemini-2.0-flash-exp:free'],
     }));
-    if (process.env.AI_GATEWAY_API_KEY) add(openAICompatible({
+    // Vercel AI Gateway as a FALLBACK (only reached if the fast providers
+    // above all fail). Uses VERCEL_AI_GATEWAY_KEY or AI_GATEWAY_API_KEY.
+    // Note: the gateway requires a valid credit card on the Vercel account —
+    // without one it returns HTTP 403 and this step is simply skipped over.
+    if (GATEWAY_KEY) add(openAICompatible({
         name: 'gateway',
         url: 'https://ai-gateway.vercel.sh/v1/chat/completions',
-        key: process.env.AI_GATEWAY_API_KEY,
-        models: ['groq/llama-3.3-70b-versatile', 'openai/gpt-4o-mini'],
+        key: GATEWAY_KEY,
+        models: ['groq/llama-3.1-8b-instant', 'openai/gpt-4o-mini'],
     }));
 
     // 3) Keyless last-resort so AI never fully dies.

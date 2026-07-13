@@ -1,16 +1,14 @@
 /**
- * .animeinfo <anime_id> — anime detail via animekill
+ * .animeinfo <name | MAL id> — anime details via Jikan (MyAnimeList)
+ *
+ * Works standalone: pass an anime name (e.g. ".animeinfo jujutsu kaisen")
+ * or a MyAnimeList numeric id (e.g. ".animeinfo 40748"). Jikan is a free,
+ * reliable public API — no key required.
  */
 'use strict';
 const axios = require('axios');
 
-function pickThumb(o) {
-    for (const k of ['image', 'poster', 'thumbnail', 'thumb', 'cover', 'img', 'banner']) {
-        const v = o?.[k];
-        if (typeof v === 'string' && /^https?:\/\//.test(v)) return v;
-    }
-    return null;
-}
+const JIKAN = 'https://api.jikan.moe/v4';
 
 function trim(s, n) {
     if (!s) return '';
@@ -18,73 +16,91 @@ function trim(s, n) {
     return s.length > n ? s.slice(0, n - 1) + '…' : s;
 }
 
+// Jikan occasionally returns transient 5xx / 429 — retry a few times.
+async function jget(url, params) {
+    let last = null;
+    for (let i = 0; i < 4; i++) {
+        try {
+            const r = await axios.get(url, { params, timeout: 20000, validateStatus: () => true });
+            if (r.status === 200) return r.data;
+            last = `HTTP ${r.status}`;
+        } catch (e) {
+            last = e.message;
+        }
+        await new Promise(res => setTimeout(res, 1200));
+    }
+    throw new Error(last || 'request failed');
+}
+
+async function resolveAnime(query) {
+    // Numeric → treat as a MAL id.
+    if (/^\d+$/.test(query)) {
+        const d = await jget(`${JIKAN}/anime/${query}/full`);
+        return d?.data || null;
+    }
+    // Otherwise search by name and take the best match.
+    const d = await jget(`${JIKAN}/anime`, { q: query, limit: 1, sfw: true });
+    return d?.data?.[0] || null;
+}
+
 module.exports = {
     name: 'animeinfo',
     aliases: ['animedetail', 'ainfo'],
-    description: 'Get anime details by anime_id',
+    description: 'Get anime details by name or MyAnimeList id',
     category: 'media',
+    usage: '.animeinfo <name | MAL id>',
+
     async execute({ sock, msg, from, reply, args }) {
-        if (!args.length) {
+        const query = (args || []).join(' ').trim();
+        if (!query) {
             return reply(
                 `🎌 *Anime Info*\n\n` +
-                `Usage: .animeinfo <anime_id>\n` +
-                `_Get an id from:_ .anime <query>`
+                `Usage: .animeinfo <name | MAL id>\n` +
+                `Example: .animeinfo jujutsu kaisen\n` +
+                `Example: .animeinfo 40748`
             );
         }
-        const id = args[0].trim();
+
         try {
-            await sock.sendMessage(from, { react: { text: '⏳', key: msg.key } });
-            const ep = `https://apis.prexzyvilla.site/anime/animekill-detail?anime_id=${encodeURIComponent(id)}`;
-            const r = await axios.get(ep, { timeout: 30000, validateStatus: () => true });
-            if (r.status >= 400) throw new Error(`API ${r.status}`);
-            const a = r.data?.data ?? r.data?.result ?? r.data ?? {};
-            if (!a || (typeof a === 'object' && !Object.keys(a).length)) {
-                await sock.sendMessage(from, { react: { text: '❌', key: msg.key } });
-                return reply(`❌ No info for id *${id}*.`);
+            await sock.sendMessage(from, { react: { text: '🔍', key: msg.key } }).catch(() => {});
+
+            const a = await resolveAnime(query);
+            if (!a) {
+                await sock.sendMessage(from, { react: { text: '❌', key: msg.key } }).catch(() => {});
+                return reply(`❌ No anime found for *${query}*.`);
             }
 
-            const title = a.title || a.name || 'Unknown';
-            const type = a.type || a.format || '';
-            const status = a.status || '';
-            const eps = a.episodes || a.totalEpisodes || (Array.isArray(a.episodeList) ? a.episodeList.length : '');
-            const released = a.released || a.year || a.aired || '';
-            const genres = Array.isArray(a.genres) ? a.genres.join(', ')
-                         : Array.isArray(a.genre) ? a.genre.join(', ')
-                         : (a.genres || a.genre || '');
-            const synopsis = a.synopsis || a.description || a.plot || a.summary || '';
+            const title    = a.title_english || a.title || a.title_japanese || 'Unknown';
+            const genres   = (a.genres || []).map(g => g.name).join(', ');
+            const studios  = (a.studios || []).map(s => s.name).join(', ');
+            const aired    = a.aired?.string || (a.year ? String(a.year) : '');
+            const synopsis = a.synopsis || '';
 
-            let out = `🎌 *${title}*\n\n`;
-            if (type)     out += `🎭 Type: ${type}\n`;
-            if (status)   out += `📡 Status: ${status}\n`;
-            if (eps)      out += `🎞️ Episodes: ${eps}\n`;
-            if (released) out += `📅 Released: ${released}\n`;
-            if (genres)   out += `🏷️ Genres: ${genres}\n`;
-            if (synopsis) out += `\n📖 ${trim(synopsis, 700)}\n`;
+            let out = `🎌 *${title}*\n`;
+            if (a.title_japanese) out += `🇯🇵 ${a.title_japanese}\n`;
+            out += `\n`;
+            if (a.type)      out += `🎭 Type: ${a.type}\n`;
+            if (a.status)    out += `📡 Status: ${a.status}\n`;
+            if (a.episodes)  out += `🎞️ Episodes: ${a.episodes}\n`;
+            if (a.duration)  out += `⏱️ Duration: ${a.duration}\n`;
+            if (a.score)     out += `⭐ Score: ${a.score}${a.scored_by ? ` (${a.scored_by.toLocaleString()} votes)` : ''}\n`;
+            if (a.rank)      out += `🏆 Rank: #${a.rank}\n`;
+            if (aired)       out += `📅 Aired: ${aired}\n`;
+            if (studios)     out += `🏢 Studio: ${studios}\n`;
+            if (genres)      out += `🏷️ Genres: ${genres}\n`;
+            if (synopsis)    out += `\n📖 ${trim(synopsis, 800)}\n`;
+            if (a.url)       out += `\n🔗 ${a.url}`;
 
-            const episodeList = Array.isArray(a.episodeList) ? a.episodeList
-                              : Array.isArray(a.episodes_list) ? a.episodes_list
-                              : Array.isArray(a.episodes) && a.episodes.length && typeof a.episodes[0] === 'object' ? a.episodes
-                              : null;
-            if (episodeList && episodeList.length) {
-                const show = episodeList.slice(0, 12);
-                out += `\n*Episodes (showing ${show.length}/${episodeList.length}):*\n`;
-                show.forEach((e, i) => {
-                    const num = e.number || e.ep || e.episode || i + 1;
-                    const link = e.url || e.link || e.id || '';
-                    out += `• Ep ${num}${link ? ` — ${link}` : ''}\n`;
-                });
-            }
-
-            const thumb = pickThumb(a);
+            const thumb = a.images?.jpg?.large_image_url || a.images?.jpg?.image_url || a.images?.webp?.image_url;
             if (thumb) {
                 try {
                     await sock.sendMessage(from, { image: { url: thumb }, caption: out }, { quoted: msg });
-                    await sock.sendMessage(from, { react: { text: '✅', key: msg.key } });
+                    await sock.sendMessage(from, { react: { text: '✅', key: msg.key } }).catch(() => {});
                     return;
-                } catch {}
+                } catch (_) { /* fall through */ }
             }
             await reply(out);
-            await sock.sendMessage(from, { react: { text: '✅', key: msg.key } });
+            await sock.sendMessage(from, { react: { text: '✅', key: msg.key } }).catch(() => {});
         } catch (err) {
             console.error('[animeinfo] error:', err.message);
             try { await sock.sendMessage(from, { react: { text: '❌', key: msg.key } }); } catch {}

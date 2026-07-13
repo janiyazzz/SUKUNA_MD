@@ -61,35 +61,75 @@ function mask(key) {
     return key.slice(0, 4) + '****' + key.slice(-4);
 }
 
+// A browser-like UA — Groq/Cloudflare returns 403 Forbidden to requests
+// that arrive without one, even when the API key is perfectly valid.
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+
+// Decide what a given HTTP status + body means:
+//   ok:    key definitely works
+//   auth:  key is definitely bad (reject)
+//   warn:  inconclusive (region/model/rate-limit/network) — accept with note
+function classify(status, data) {
+    if (status >= 200 && status < 300) return { kind: 'ok' };
+
+    const code = data?.error?.code || '';
+    const msg  = (data?.error?.message || '').toLowerCase();
+
+    // Genuine authentication failure → reject.
+    if (status === 401 || code === 'invalid_api_key' || msg.includes('invalid api key')) {
+        return { kind: 'auth', error: data?.error?.message || 'Invalid API Key' };
+    }
+    // Everything else (403 Forbidden, 429 rate-limit, 404 model, 5xx, region
+    // blocks, missing-UA blocks) is NOT proof the key is bad — accept it.
+    return { kind: 'warn', error: data?.error?.message || `HTTP ${status}` };
+}
+
 async function testKey(provider, key) {
     const cfg = PROVIDERS[provider];
-    try {
-        if (cfg.kind === 'gemini') {
-            const url = `${cfg.url}/models/${cfg.testModel}:generateContent?key=${key}`;
-            const { status, data } = await axios.post(url, {
-                contents: [{ role: 'user', parts: [{ text: 'ping' }] }],
-            }, {
-                timeout: 15000,
-                headers: { 'Content-Type': 'application/json' },
-                validateStatus: () => true,
-            });
-            if (status >= 200 && status < 300) return { ok: true };
-            return { ok: false, error: data?.error?.message || `HTTP ${status}` };
+    // Try every configured model so one unavailable model doesn't sink a good key.
+    const models = [cfg.testModel, ...cfg.models.filter(m => m !== cfg.testModel)];
+    let lastWarn = null;
+
+    for (const model of models) {
+        try {
+            let status, data;
+            if (cfg.kind === 'gemini') {
+                const url = `${cfg.url}/models/${model}:generateContent?key=${key}`;
+                ({ status, data } = await axios.post(url, {
+                    contents: [{ role: 'user', parts: [{ text: 'ping' }] }],
+                }, {
+                    timeout: 15000,
+                    headers: { 'Content-Type': 'application/json', 'User-Agent': UA },
+                    validateStatus: () => true,
+                }));
+            } else {
+                ({ status, data } = await axios.post(cfg.url, {
+                    model,
+                    messages: [{ role: 'user', content: 'ping' }],
+                    max_tokens: 5,
+                }, {
+                    timeout: 15000,
+                    headers: {
+                        'Authorization': `Bearer ${key}`,
+                        'Content-Type': 'application/json',
+                        'User-Agent': UA,
+                        'Accept': 'application/json',
+                    },
+                    validateStatus: () => true,
+                }));
+            }
+
+            const verdict = classify(status, data);
+            if (verdict.kind === 'ok')   return { ok: true };
+            if (verdict.kind === 'auth') return { ok: false, error: verdict.error }; // definitively bad
+            lastWarn = verdict.error; // try the next model before giving up
+        } catch (e) {
+            lastWarn = e.message; // network hiccup — keep trying
         }
-        const { status, data } = await axios.post(cfg.url, {
-            model: cfg.testModel,
-            messages: [{ role: 'user', content: 'ping' }],
-            max_tokens: 5,
-        }, {
-            timeout: 15000,
-            headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-            validateStatus: () => true,
-        });
-        if (status >= 200 && status < 300) return { ok: true };
-        return { ok: false, error: data?.error?.message || `HTTP ${status}` };
-    } catch (e) {
-        return { ok: false, error: e.message };
     }
+
+    // No model confirmed OK, but nothing proved the key is invalid either.
+    return { ok: true, warn: lastWarn || 'could not fully verify' };
 }
 
 function buildBlock(provider, key) {
@@ -176,6 +216,7 @@ module.exports = {
             await reply(`🔍 Testing ${provider.toUpperCase()} key \`${mask(key)}\`...`);
 
             const test = await testKey(provider, key);
+            // Only a definitive auth failure (401 / invalid_api_key) blocks the save.
             if (!test.ok) return reply(`❌ Key rejected by ${provider.toUpperCase()}:\n_${test.error}_`);
 
             try {
@@ -184,11 +225,18 @@ module.exports = {
                 return reply(`❌ Failed to write key: ${e.message}`);
             }
 
+            const warnNote = test.warn
+                ? `\n\n⚠️ _Couldn't fully verify against ${provider.toUpperCase()} from here (${test.warn}). ` +
+                  'The key looks valid and has been saved — the bot will use it. ' +
+                  'If replies fail, double-check the key._'
+                : '';
+
             return reply(
                 '✅ *Chatbot API updated!*\n\n' +
                 `Provider: *${provider}*\n` +
                 `Key:      \`${mask(key)}\`\n\n` +
-                '🤖 The chatbot is now using the new key — no restart needed.'
+                '🤖 The chatbot is now using the new key — no restart needed.' +
+                warnNote
             );
         }
 

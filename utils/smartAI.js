@@ -53,6 +53,9 @@ function openAICompatible({ name, url, key, models }) {
                 headers: {
                     Authorization: `Bearer ${key}`,
                     'Content-Type': 'application/json',
+                    // Browser-like UA avoids 403 Forbidden blocks from Groq/Cloudflare.
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+                    'Accept': 'application/json',
                     'HTTP-Referer': 'https://github.com/pasquawisdom2007-beep/Sukuna-MD-V3',
                     'X-Title': 'SUKUNA MD',
                 },

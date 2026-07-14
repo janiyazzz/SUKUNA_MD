@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@crysnovax/baileys':
-        specifier: ^2.6.7
-        version: 2.6.8(sharp@0.33.5)
+        specifier: ^2.6.9
+        version: 2.6.9(sharp@0.33.5)
       axios:
         specifier: ^1.7.9
         version: 1.18.1
@@ -70,8 +70,8 @@ packages:
   '@cacheable/utils@2.5.0':
     resolution: {integrity: sha512-buipgOVDkkPXNR5+xBpDw7Zk2n1EvU7qBJCNUcL7rhQ//kfpOXPAvQ511Os0vpLYJ1pZnvudNytkQt2hst3wqA==}
 
-  '@crysnovax/baileys@2.6.8':
-    resolution: {integrity: sha512-9TkG5nvVfCo4w9pBTCYZG60fUTPxj13eG5yjGEkpwjTuSF94TnMxpyzGn8WVg4vX4MdDiwbVvAxw03mxbyCz1A==}
+  '@crysnovax/baileys@2.6.9':
+    resolution: {integrity: sha512-TVOcd5aG78BFjJWS1NvJTDotWifXRfY01j4d12vVIMH+cx7EKvwHNnPNvzSR2Ee/Skl87pR9ZmZMDnBKj6CTDw==}
     engines: {node: '>=20.0.0'}
     peerDependencies:
       '@napi-rs/image': ~1.12.0
@@ -844,8 +844,8 @@ packages:
   win-guid@0.2.1:
     resolution: {integrity: sha512-gEIQU4mkgl2OPeoNrWflcJFJ3Ae2BPd4eCsHHA/XikslkIVms/nHhvnvzIZV7VLmBvtFlDOzLt9rrZT+n6D67A==}
 
-  ws@8.21.0:
-    resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==}
+  ws@8.21.1:
+    resolution: {integrity: sha512-+0NTnW77fFN/DjQi6k/Sq/Yvk4Sgajw7urW8V+asjXnRgDs9gyGkdb7EzgfhA4goXsRIZKE28fzIXBHEzhuiWw==}
     engines: {node: '>=10.0.0'}
     peerDependencies:
       bufferutil: ^4.0.1
@@ -880,7 +880,7 @@ snapshots:
       hashery: 1.5.1
       keyv: 5.6.0
 
-  '@crysnovax/baileys@2.6.8(sharp@0.33.5)':
+  '@crysnovax/baileys@2.6.9(sharp@0.33.5)':
     dependencies:
       '@adiwajshing/keyed-db': 0.2.4
       '@cacheable/node-cache': 1.7.6
@@ -888,6 +888,7 @@ snapshots:
       async-mutex: 0.5.0
       fflate: 0.8.3
       libsignal: 6.0.0
+      long: 5.3.2
       lru-cache: 11.5.2
       music-metadata: 11.13.0
       p-queue: 9.3.1
@@ -895,7 +896,7 @@ snapshots:
       protobufjs: 7.6.5
       sharp: 0.33.5
       whatsapp-rust-bridge: 0.5.5
-      ws: 8.21.0
+      ws: 8.21.1
     transitivePeerDependencies:
       - bufferutil
       - supports-color
@@ -1667,4 +1668,4 @@ snapshots:
 
   win-guid@0.2.1: {}
 
-  ws@8.21.0: {}
+  ws@8.21.1: {}

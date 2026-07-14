@@ -1,8 +1,8 @@
 /**
- * Video Search Command
+ * Video Download Command
  * Usage: .xvideos <search query>
  *
- * Searches YouTube for videos and sends working clips
+ * Searches and downloads videos, sends as actual media files to WhatsApp
  */
 
 'use strict';
@@ -20,152 +20,160 @@ function ensureTempDir() {
     }
 }
 
-// Robust video search using multiple providers
-async function searchVideos(query) {
-    const errors = [];
-    
-    // Try YouTube search via RapidAPI alternatives or direct services
-    const searchApis = [
-        async () => {
-            const response = await axios.get(`https://www.youtube.com/results`, {
-                params: { search_query: encodeURIComponent(query) },
-                timeout: 10000,
-                headers: { 'User-Agent': 'Mozilla/5.0' }
-            });
-            // Parse basic video results from HTML
-            const videoMatches = response.data.match(/\/watch\?v=([a-zA-Z0-9_-]{11})/g);
-            return videoMatches ? videoMatches.slice(0, 3).map(v => ({ 
-                url: `https://www.youtube.com${v}`,
-                title: query 
-            })) : [];
+// Download video from URL using multiple service providers
+async function downloadVideoFromUrl(videoUrl) {
+    const providers = [
+        // Provider 1: Use cobalt.tools API (extremely reliable for YouTube)
+        async (url) => {
+            try {
+                const response = await axios.post('https://api.cobalt.tools/api/json', 
+                    { url: url, vcodec: 'h264', vquality: 'medium', aformat: 'best' },
+                    { timeout: 30000, responseType: 'arraybuffer', headers: { 'User-Agent': 'Mozilla/5.0' } }
+                );
+                return response.data;
+            } catch (e) {
+                throw e;
+            }
         },
-        async () => {
-            // Alternative: use a public video API
-            const response = await axios.get(`https://api.duckduckgo.com/`, {
-                params: { q: query, format: 'json' },
-                timeout: 10000,
-                headers: { 'User-Agent': 'Mozilla/5.0' }
-            });
-            return response.data.results ? response.data.results.slice(0, 3).map(r => ({
-                url: r.FirstURL,
-                title: r.Text
-            })) : [];
+        // Provider 2: Use savefrom.net approach
+        async (url) => {
+            try {
+                const response = await axios.get(`https://savefrom.net/api/info?url=${encodeURIComponent(url)}`,
+                    { timeout: 30000, responseType: 'arraybuffer', headers: { 'User-Agent': 'Mozilla/5.0' } }
+                );
+                return response.data;
+            } catch (e) {
+                throw e;
+            }
         },
-        async () => {
-            // Invidious alternative (privacy-focused YouTube)
-            const response = await axios.get(`https://invidious.snopyta.org/api/v1/search`, {
-                params: { q: query, type: 'video' },
-                timeout: 10000,
-                headers: { 'User-Agent': 'Mozilla/5.0' }
-            });
-            return response.data ? response.data.slice(0, 3).map(v => ({
-                url: `https://invidious.snopyta.org/watch?v=${v.videoId}`,
-                title: v.title,
-                duration: v.lengthSeconds
-            })) : [];
+        // Provider 3: Direct YouTube stream fetch
+        async (url) => {
+            try {
+                // Get video info and stream directly
+                const videoId = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/)?.[1];
+                if (!videoId) throw new Error('Invalid YouTube URL');
+                
+                const response = await axios.get(`https://www.youtube.com/watch?v=${videoId}`,
+                    { timeout: 30000, headers: { 'User-Agent': 'Mozilla/5.0' } }
+                );
+                
+                // Return the video for streaming
+                const streamUrl = response.data.match(/https:\/\/[^"]*\.mp4[^"]*/)?.[0];
+                if (streamUrl) {
+                    const stream = await axios.get(streamUrl, { responseType: 'arraybuffer', timeout: 30000 });
+                    return stream.data;
+                }
+                throw new Error('Could not extract stream');
+            } catch (e) {
+                throw e;
+            }
         }
     ];
 
-    for (const api of searchApis) {
+    for (let i = 0; i < providers.length; i++) {
         try {
-            const results = await api();
-            if (results && results.length > 0) {
-                console.log(`[xvideos] Found ${results.length} videos`);
-                return results;
+            console.log(`[xvideos] Trying download provider ${i + 1}...`);
+            const data = await providers[i](videoUrl);
+            
+            if (data && data.length > 1000) {
+                console.log(`[xvideos] Download successful with provider ${i + 1} (${(data.length / 1024 / 1024).toFixed(2)}MB)`);
+                return data;
             }
         } catch (e) {
-            errors.push(e.message);
+            console.log(`[xvideos] Provider ${i + 1} failed: ${e.message}`);
         }
     }
 
-    throw new Error(`All video search APIs failed: ${errors.join(' | ')}`);
+    throw new Error('All video download providers failed');
 }
 
-// Download video using yt-dlp equivalent
-async function downloadVideo(url, query) {
+// Search for videos
+async function searchVideos(query) {
     try {
-        ensureTempDir();
-        const filename = `video_${Date.now()}.mp4`;
-        const filepath = path.join(TEMP_DIR, filename);
-
-        // Try using ytdl-core or yt-dlp if available
-        const { spawn } = require('child_process');
-        
-        return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                reject(new Error('Video download timeout (30s)'));
-            }, 30000);
-
-            // Fallback: just return the video URL for WhatsApp to handle
-            // Modern WhatsApp bots use URL delivery instead of local downloads
-            resolve({
-                url: url,
-                filename: filename,
-                size: 0
-            });
-
-            clearTimeout(timeout);
+        // Use Invidious API to search YouTube
+        const response = await axios.get('https://invidious.snopyta.org/api/v1/search', {
+            params: { q: query, type: 'video', sort_by: 'relevance' },
+            timeout: 15000,
+            headers: { 'User-Agent': 'Mozilla/5.0' }
         });
-    } catch (e) {
-        console.error('[xvideos] Download error:', e.message);
-        throw e;
+
+        if (response.data && Array.isArray(response.data)) {
+            return response.data.slice(0, 3).map(v => ({
+                videoId: v.videoId,
+                title: v.title,
+                duration: v.lengthSeconds,
+                author: v.author,
+                url: `https://www.youtube.com/watch?v=${v.videoId}`
+            }));
+        }
+        throw new Error('No results found');
+    } catch (err) {
+        console.error('[xvideos] Search error:', err.message);
+        throw err;
     }
 }
 
 module.exports = {
     name: 'xvideos',
-    aliases: ['video', 'search', 'playvideo'],
-    description: 'Search and send videos',
+    aliases: ['video', 'yt', 'youtube', 'search'],
+    description: 'Download and send videos from search',
     category: 'media',
 
-    async execute({ sock, msg, from, reply, args }) {
+    async execute({ sock, msg, from, reply, args, isGroup }) {
+        if (!args.length) {
+            return reply('🎬 *Video Search & Download*\n\nUsage: `.xvideos <search query>`\n\nExample: `.xvideos cute cat`');
+        }
+
+        const query = args.join(' ').trim();
+
         try {
-            const query = (args || []).join(' ').trim();
+            // React with loading
+            await sock.sendMessage(from, { react: { text: '⏳', key: msg.key } });
 
-            if (!query) {
-                return reply('🎬 *Video Search*\nUsage: .xvideos <search query>\nExample: .xvideos funny cats');
-            }
-
-            if (query.length > 150) {
-                return reply('❌ Search query too long (max 150 characters)');
-            }
-
-            await sock.sendMessage(from, { 
-                react: { text: '🔍', key: msg.key } 
-            }).catch(() => {});
-
+            // Search for video
             console.log(`[xvideos] Searching for: ${query}`);
-            const videos = await searchVideos(query);
+            const results = await searchVideos(query);
 
-            if (!videos || videos.length === 0) {
-                await sock.sendMessage(from, { 
-                    react: { text: '❌', key: msg.key } 
-                }).catch(() => {});
-                return reply('❌ No videos found. Try a different search query.');
+            if (!results || results.length === 0) {
+                return reply('❌ No videos found. Try a different search.');
             }
 
-            // Get first result
-            const video = videos[0];
-            let caption = `🎬 *Video Found*\n\n`;
-            caption += `📝 Title: ${video.title || query}\n`;
-            caption += `⏱️ Duration: ${video.duration ? `${Math.floor(video.duration / 60)}m ${video.duration % 60}s` : 'Unknown'}\n`;
-            caption += `🔗 Link: ${video.url}\n\n`;
-            caption += `> SUKUNA MD`;
+            const video = results[0];
+            console.log(`[xvideos] Found video: ${video.title}`);
 
+            // Download the video
+            console.log(`[xvideos] Downloading: ${video.url}`);
+            const videoBuffer = await downloadVideoFromUrl(video.url);
+
+            // Check file size
+            if (videoBuffer.length > MAX_VIDEO_SIZE) {
+                return reply(`❌ Video too large (${(videoBuffer.length / 1024 / 1024).toFixed(2)}MB). Max 10MB.`);
+            }
+
+            // Save temporarily and send
+            ensureTempDir();
+            const filename = `video_${Date.now()}.mp4`;
+            const filepath = path.join(TEMP_DIR, filename);
+
+            fs.writeFileSync(filepath, videoBuffer);
+
+            // Send video
             await sock.sendMessage(from, {
-                text: caption
+                video: fs.readFileSync(filepath),
+                mimetype: 'video/mp4',
+                caption: `🎬 *${video.title}*\n⏱️ Duration: ${video.duration}s\n👤 Author: ${video.author}\n\n> SUKUNA MD`
             }, { quoted: msg });
 
-            await sock.sendMessage(from, { 
-                react: { text: '✅', key: msg.key } 
-            }).catch(() => {});
+            // Clean up
+            try { fs.unlinkSync(filepath); } catch (_) {}
+
+            // Success reaction
+            await sock.sendMessage(from, { react: { text: '✅', key: msg.key } });
 
         } catch (err) {
-            console.error('[xvideos]', err.message);
-            await sock.sendMessage(from, { 
-                react: { text: '❌', key: msg.key } 
-            }).catch(() => {});
-            reply(`❌ Error: ${err.message}`);
+            console.error('[xvideos] Error:', err.message);
+            await sock.sendMessage(from, { react: { text: '❌', key: msg.key } });
+            reply(`❌ Video download failed: ${err.message}`);
         }
     }
 };

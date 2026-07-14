@@ -52,6 +52,43 @@ class Database {
         return this.data.lastSeen?.[groupId]?.[userJid] || 0;
     }
 
+    // ── Message Count Tracking (for listactive/listinactive) ────────────────
+    incrementMessageCount(groupId, userJid) {
+        if (!groupId || !userJid) return;
+        if (!this.data.lastSeen[groupId]) this.data.lastSeen[groupId] = {};
+        
+        // Store both lastSeen timestamp and message count
+        if (!this.data.lastSeen[groupId][userJid]) {
+            this.data.lastSeen[groupId][userJid] = { lastSeen: Date.now(), msgCount: 0 };
+        } else if (typeof this.data.lastSeen[groupId][userJid] === 'number') {
+            // Migrate old format to new format
+            const oldTime = this.data.lastSeen[groupId][userJid];
+            this.data.lastSeen[groupId][userJid] = { lastSeen: oldTime, msgCount: 0 };
+        }
+        
+        this.data.lastSeen[groupId][userJid].lastSeen = Date.now();
+        this.data.lastSeen[groupId][userJid].msgCount = (this.data.lastSeen[groupId][userJid].msgCount || 0) + 1;
+        
+        // Throttle disk writes
+        const now = Date.now();
+        if (now - this._lastSeenSaveAt > 30000) {
+            this._lastSeenSaveAt = now;
+            try { this.save('lastSeen'); } catch (_) {}
+        }
+    }
+
+    getMessageCount(groupId, userJid) {
+        const data = this.data.lastSeen?.[groupId]?.[userJid];
+        if (!data) return 0;
+        if (typeof data === 'number') return 0; // old format
+        return data.msgCount || 0;
+    }
+
+    getAllUserActivity(groupId) {
+        if (!this.data.lastSeen || !this.data.lastSeen[groupId]) return {};
+        return this.data.lastSeen[groupId];
+    }
+
     ensureDataDir() {
         if (!fs.existsSync(this.dataDir)) {
             fs.mkdirSync(this.dataDir, { recursive: true });

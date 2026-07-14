@@ -2,134 +2,81 @@
  * ATTP — Animated Text To Picture (sticker)
  * Usage: .attp <text>
  *
- * Generates the animated sticker LOCALLY with sharp + node-webpmux (no
- * external API), so it never breaks when a third-party service goes down.
- * Text is rendered as colour-cycling frames and assembled into an animated
- * WebP sticker that WhatsApp accepts directly.
+ * Generates animated stickers using reliable external APIs with fallback support.
  */
 'use strict';
 
-const fs    = require('fs');
-const path  = require('path');
-const sharp = require('sharp');
-const webp  = require('node-webpmux');
+const axios = require('axios');
 
-const COLORS = ['#ff2b2b', '#ffd52b', '#2bff6a', '#2b8bff', '#c22bff', '#ff2bd0'];
-const SIZE   = 512;
-const FONT_FAMILY = 'AttpFont';
+// Multiple API endpoints for high reliability
+const ATTP_APIS = [
+    (text) => `https://api.botcahx.biz.id/api/attp?text=${encodeURIComponent(text)}`,
+    (text) => `https://api.zacros.my.id/api/attp?text=${encodeURIComponent(text)}`,
+    (text) => `https://rest-api.prexzyvilla.site/api/attp?text=${encodeURIComponent(text)}`,
+];
 
-let _libReady = false;
-async function ensureLib() {
-    if (!_libReady) { await webp.Image.initLib(); _libReady = true; }
-}
-
-// Load the bundled font once and embed it (base64) into the SVG. Without this,
-// hosts that lack system fonts render blank text -> "empty" stickers.
-let _fontFace = null;
-function getFontFace() {
-    if (_fontFace !== null) return _fontFace;
-    try {
-        const fontPath = path.join(__dirname, '..', '..', 'assets', 'attp-font.ttf');
-        const b64 = fs.readFileSync(fontPath).toString('base64');
-        _fontFace =
-            `<defs><style type="text/css">@font-face{font-family:'${FONT_FAMILY}';` +
-            `src:url(data:font/ttf;base64,${b64}) format('truetype');` +
-            `font-weight:bold;font-style:normal;}</style></defs>`;
-    } catch (e) {
-        console.error('[attp] font load failed, falling back to system font:', e.message);
-        _fontFace = '';
+async function generateAttp(text) {
+    for (let i = 0; i < ATTP_APIS.length; i++) {
+        try {
+            const url = ATTP_APIS[i](text);
+            console.log(`[attp] Trying API ${i + 1}/${ATTP_APIS.length}`);
+            
+            const response = await axios.get(url, {
+                timeout: 15000,
+                responseType: 'arraybuffer',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+            });
+            
+            if (response.data && response.data.length > 100) {
+                console.log(`[attp] Success with API ${i + 1}`);
+                return response.data;
+            }
+        } catch (e) {
+            console.log(`[attp] API ${i + 1} failed: ${e.message}`);
+            if (i < ATTP_APIS.length - 1) continue;
+            throw new Error(`All ATTP APIs failed. Last error: ${e.message}`);
+        }
     }
-    return _fontFace;
-}
-
-function escapeXml(s) {
-    return String(s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&apos;');
-}
-
-// Wrap text into at most `maxLines` lines of roughly `maxChars` characters.
-function wrapText(text, maxChars = 12, maxLines = 3) {
-    const words = text.split(/\s+/).filter(Boolean);
-    const lines = [];
-    let cur = '';
-    for (const w of words) {
-        if (!cur) { cur = w; }
-        else if ((cur + ' ' + w).length <= maxChars) { cur += ' ' + w; }
-        else { lines.push(cur); cur = w; }
-        if (lines.length >= maxLines) break;
-    }
-    if (cur && lines.length < maxLines) lines.push(cur);
-    // Hard-cut anything that is still too long.
-    return lines.slice(0, maxLines).map(l => (l.length > maxChars + 4 ? l.slice(0, maxChars + 3) + '…' : l));
-}
-
-function buildSvg(lines, color) {
-    const longest  = Math.max(...lines.map(l => l.length), 1);
-    // Scale font so the longest line fits inside ~460px of the 512 canvas.
-    const fontSize = Math.max(48, Math.min(150, Math.floor(920 / longest)));
-    const lineGap  = fontSize * 1.15;
-    const totalH   = lineGap * lines.length;
-    const startY   = (SIZE - totalH) / 2 + fontSize * 0.8;
-    const tspans = lines.map((l, i) =>
-        `<text x="${SIZE / 2}" y="${startY + i * lineGap}" font-size="${fontSize}" ` +
-        `fill="${color}" text-anchor="middle" font-family="'${FONT_FAMILY}',sans-serif" font-weight="bold" ` +
-        `stroke="#000000" stroke-width="${Math.max(2, fontSize * 0.04)}" paint-order="stroke">` +
-        `${escapeXml(l)}</text>`
-    ).join('');
-    return Buffer.from(
-        `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}">${getFontFace()}${tspans}</svg>`
-    );
-}
-
-async function makeAttpSticker(text) {
-    await ensureLib();
-    const lines  = wrapText(text);
-    const frames = [];
-    for (const color of COLORS) {
-        const svg = buildSvg(lines, color);
-        const buf = await sharp(svg, { density: 150 }).webp({ lossless: true }).toBuffer();
-        frames.push(await webp.Image.generateFrame({ buffer: buf, delay: 130 }));
-    }
-    return webp.Image.save(null, {
-        width: SIZE,
-        height: SIZE,
-        frames,
-        bgColor: [0, 0, 0, 0],
-        loops: 0,
-    });
 }
 
 module.exports = {
     name: 'attp',
-    aliases: ['animatedttp', 'text2gif'],
+    aliases: ['animatedttp', 'text2gif', 'sticker'],
     description: 'Create an animated sticker from text',
     category: 'media',
 
     async execute({ sock, msg, from, reply, args }) {
         const text = (args || []).join(' ').trim();
+        
         if (!text) {
             return reply(
                 `✨ *Animated Text To Picture*\n\n` +
                 `Usage: .attp <text>\n` +
-                `Example: .attp Hello World`
+                `Example: .attp SUKUNA MD`
             );
+        }
+
+        if (text.length > 100) {
+            return reply('❌ Text too long! Maximum 100 characters allowed.');
         }
 
         try {
             await sock.sendMessage(from, { react: { text: '⏳', key: msg.key } }).catch(() => {});
-            const sticker = await makeAttpSticker(text);
-            if (!sticker || sticker.length < 200) throw new Error('empty sticker buffer');
+            
+            const sticker = await generateAttp(text);
+            
+            if (!sticker || sticker.length < 200) {
+                throw new Error('Generated sticker is too small or empty');
+            }
 
             await sock.sendMessage(from, { sticker }, { quoted: msg });
             await sock.sendMessage(from, { react: { text: '✅', key: msg.key } }).catch(() => {});
         } catch (err) {
-            console.error('[attp] error:', err.message);
+            console.error('[attp] Error:', err.message);
             await sock.sendMessage(from, { react: { text: '❌', key: msg.key } }).catch(() => {});
-            reply('❌ Failed to create animated text sticker. Please try a shorter text.');
+            reply(`❌ Failed to create sticker: ${err.message}`);
         }
-    },
+    }
 };

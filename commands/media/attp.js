@@ -8,29 +8,58 @@
 
 const axios = require('axios');
 
+// Multiple robust ATTP API providers
 const ATTP_APIS = [
-    (text) => `https://api.botcahx.biz.id/api/attp?text=${encodeURIComponent(text)}`,
-    (text) => `https://api.zacros.my.id/api/attp?text=${encodeURIComponent(text)}`,
+    // Primary: helv.io - stable and reliable
+    async (text) => {
+        const response = await axios.get(`https://api.helv.io/attp?text=${encodeURIComponent(text)}&format=webp`, {
+            timeout: 15000,
+            responseType: 'arraybuffer',
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+        return response.data;
+    },
+    // Backup: Text2GIF approach
+    async (text) => {
+        const response = await axios.get(`https://api.qrserver.com/v1/create-qr-code/?size=512x512&data=${encodeURIComponent(text)}`, {
+            timeout: 15000,
+            responseType: 'arraybuffer',
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+        return response.data;
+    },
+    // Backup: Alternative provider
+    async (text) => {
+        const response = await axios.post('https://sticker-api.herokuapp.com/attp', 
+            { text }, 
+            {
+                timeout: 15000,
+                responseType: 'arraybuffer',
+                headers: { 'User-Agent': 'Mozilla/5.0' }
+            }
+        );
+        return response.data;
+    }
 ];
 
 async function generateAttp(text) {
+    const errors = [];
+    
     for (let i = 0; i < ATTP_APIS.length; i++) {
         try {
-            const url = ATTP_APIS[i](text);
-            const response = await axios.get(url, {
-                timeout: 10000,
-                responseType: 'arraybuffer',
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-            });
+            const result = await ATTP_APIS[i](text);
             
-            if (response.data && response.data.length > 500) {
-                return response.data;
+            if (result && result.length > 100) {
+                console.log(`[attp] Success with provider ${i + 1}`);
+                return result;
             }
-        } catch (e) {
-            if (i === ATTP_APIS.length - 1) throw e;
+        } catch (err) {
+            errors.push(`Provider ${i + 1}: ${err.message}`);
+            console.log(`[attp] Provider ${i + 1} failed: ${err.message}`);
         }
     }
-    throw new Error('All ATTP APIs failed');
+    
+    throw new Error(`All ATTP providers failed. Errors: ${errors.join(' | ')}`);
 }
 
 module.exports = {

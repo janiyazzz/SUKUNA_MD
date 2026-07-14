@@ -3,7 +3,6 @@
  * Usage: .listactive
  *
  * Tags all active members in the group with their message count.
- * Active members are those who have sent messages recently (within 7 days).
  */
 
 'use strict';
@@ -11,12 +10,12 @@
 module.exports = {
     name: 'listactive',
     aliases: ['active', 'activemembers'],
-    description: 'List and tag all active members with message counts',
+    description: 'Tag all active members with message counts',
     category: 'admin',
 
     async execute({ sock, msg, from, reply, isGroup, db }) {
         if (!isGroup) {
-            return reply('👥 This command can only be used in groups!');
+            return reply('👥 This command only works in groups!');
         }
 
         try {
@@ -25,80 +24,62 @@ module.exports = {
             
             const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
             const now = Date.now();
-            const activeMembers = [];
+            const active = [];
 
-            // Get all user activity from database
             const allActivity = db.getAllUserActivity(from);
 
-            // Find active members
             for (const participant of participants) {
                 const userJid = participant.id;
                 const activity = allActivity?.[userJid];
                 
-                let lastSeenTime = 0;
+                let isActive = false;
                 let msgCount = 0;
+                let lastSeen = 0;
 
                 if (activity) {
                     if (typeof activity === 'object') {
-                        lastSeenTime = activity.lastSeen || 0;
+                        lastSeen = activity.lastSeen || 0;
                         msgCount = activity.msgCount || 0;
                     } else {
-                        lastSeenTime = activity;
+                        lastSeen = activity;
+                    }
+                    
+                    // Active if seen within 7 days or has messages
+                    if (now - lastSeen <= SEVEN_DAYS || msgCount > 0) {
+                        isActive = true;
                     }
                 }
 
-                // Consider active if seen within 7 days or has messages
-                if (msgCount > 0 || (now - lastSeenTime < SEVEN_DAYS && lastSeenTime > 0)) {
-                    const daysSinceActive = lastSeenTime > 0 ? Math.floor((now - lastSeenTime) / (24 * 60 * 60 * 1000)) : 'new';
-                    activeMembers.push({
-                        jid: userJid,
-                        name: participant.pushName || 'Unknown',
-                        msgCount: msgCount,
-                        lastSeen: lastSeenTime,
-                        daysSince: daysSinceActive
-                    });
+                if (isActive) {
+                    active.push({ jid: userJid, msgCount, lastSeen });
                 }
             }
 
-            if (activeMembers.length === 0) {
-                return reply('❌ No active members found in this group.');
+            if (active.length === 0) {
+                return reply('📊 No active members found');
             }
 
-            // Sort by message count (descending)
-            activeMembers.sort((a, b) => b.msgCount - a.msgCount);
+            // Sort by message count (highest first)
+            active.sort((a, b) => b.msgCount - a.msgCount);
 
-            // Build mentions string
-            let mentionText = `👥 *ACTIVE MEMBERS* (${activeMembers.length})\n\n`;
-            mentionText += `Group: *${meta.subject}*\n`;
-            mentionText += `Updated: ${new Date().toLocaleString()}\n\n`;
-            mentionText += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
-
-            const mentionedJids = [];
+            // Build mention string
+            let mentions = active.map(a => a.jid);
+            let text = `👥 *Active Members (${active.length})* 👥\n\n`;
             
-            for (let i = 0; i < activeMembers.length; i++) {
-                const member = activeMembers[i];
-                const dayText = member.daysSince === 'new' ? 'just joined' : `${member.daysSince}d ago`;
-                
-                mentionText += `${i + 1}. @${member.jid.split('@')[0]}\n`;
-                mentionText += `   💬 Messages: ${member.msgCount}\n`;
-                mentionText += `   ⏰ Active: ${dayText}\n\n`;
-                
-                mentionedJids.push(member.jid);
-            }
+            active.forEach((member, i) => {
+                const name = member.jid.split('@')[0];
+                const days = Math.floor((now - member.lastSeen) / (24 * 60 * 60 * 1000));
+                text += `${i + 1}. @${name}\n   💬 ${member.msgCount} messages • Last: ${days}d ago\n`;
+            });
 
-            mentionText += `━━━━━━━━━━━━━━━━━━━━━\n`;
-            mentionText += `Total Active: *${activeMembers.length}*\n`;
-            mentionText += `\n> SUKUNA MD`;
-
-            // Send message with mentions
             await sock.sendMessage(from, {
-                text: mentionText,
-                mentions: mentionedJids
+                text,
+                mentions
             }, { quoted: msg });
 
         } catch (err) {
-            console.error('[listactive] Error:', err.message);
-            reply(`❌ Failed to list active members: ${err.message}`);
+            console.error('[listactive]', err.message);
+            reply(`❌ Error: ${err.message}`);
         }
     }
 };

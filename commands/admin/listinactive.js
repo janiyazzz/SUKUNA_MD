@@ -2,8 +2,7 @@
  * List Inactive Members Command
  * Usage: .listinactive
  *
- * Tags all inactive members in the group with their last activity.
- * Inactive members are those who haven't sent messages in 7+ days or never interacted.
+ * Tags all inactive members in the group.
  */
 
 'use strict';
@@ -11,12 +10,12 @@
 module.exports = {
     name: 'listinactive',
     aliases: ['inactive', 'inactivemembers'],
-    description: 'List and tag all inactive members',
+    description: 'Tag all inactive members',
     category: 'admin',
 
     async execute({ sock, msg, from, reply, isGroup, db }) {
         if (!isGroup) {
-            return reply('👥 This command can only be used in groups!');
+            return reply('👥 This command only works in groups!');
         }
 
         try {
@@ -25,88 +24,63 @@ module.exports = {
             
             const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
             const now = Date.now();
-            const inactiveMembers = [];
+            const inactive = [];
 
-            // Get all user activity from database
             const allActivity = db.getAllUserActivity(from);
 
-            // Find inactive members
             for (const participant of participants) {
                 const userJid = participant.id;
                 const activity = allActivity?.[userJid];
                 
-                let lastSeenTime = 0;
-                let msgCount = 0;
+                let isInactive = false;
+                let lastSeen = 0;
 
-                if (activity) {
+                if (!activity) {
+                    // Never seen = inactive
+                    isInactive = true;
+                } else {
                     if (typeof activity === 'object') {
-                        lastSeenTime = activity.lastSeen || 0;
-                        msgCount = activity.msgCount || 0;
+                        lastSeen = activity.lastSeen || 0;
                     } else {
-                        lastSeenTime = activity;
+                        lastSeen = activity;
+                    }
+                    
+                    // Inactive if not seen in 7+ days
+                    if (now - lastSeen > SEVEN_DAYS) {
+                        isInactive = true;
                     }
                 }
 
-                // Consider inactive if no messages or last seen > 7 days ago
-                if (msgCount === 0 || (lastSeenTime === 0) || (now - lastSeenTime >= SEVEN_DAYS)) {
-                    let daysSinceActive = 'never';
-                    if (lastSeenTime > 0) {
-                        daysSinceActive = Math.floor((now - lastSeenTime) / (24 * 60 * 60 * 1000));
-                    }
-
-                    inactiveMembers.push({
-                        jid: userJid,
-                        name: participant.pushName || 'Unknown',
-                        msgCount: msgCount,
-                        lastSeen: lastSeenTime,
-                        daysSince: daysSinceActive
-                    });
+                if (isInactive) {
+                    inactive.push({ jid: userJid, lastSeen });
                 }
             }
 
-            if (inactiveMembers.length === 0) {
-                return reply('✅ No inactive members! Everyone is active in this group.');
+            if (inactive.length === 0) {
+                return reply('📊 No inactive members found');
             }
 
             // Sort by last seen (oldest first)
-            inactiveMembers.sort((a, b) => {
-                if (a.lastSeen === 0) return -1; // Never seen goes first
-                if (b.lastSeen === 0) return 1;
-                return a.lastSeen - b.lastSeen;
+            inactive.sort((a, b) => a.lastSeen - b.lastSeen);
+
+            // Build mention string
+            let mentions = inactive.map(a => a.jid);
+            let text = `⏸️ *Inactive Members (${inactive.length})* ⏸️\n\n`;
+            
+            inactive.forEach((member, i) => {
+                const name = member.jid.split('@')[0];
+                const lastSeenText = member.lastSeen === 0 ? 'Never' : `${Math.floor((now - member.lastSeen) / (24 * 60 * 60 * 1000))}d ago`;
+                text += `${i + 1}. @${name}\n   📍 Last: ${lastSeenText}\n`;
             });
 
-            // Build mentions string
-            let mentionText = `😴 *INACTIVE MEMBERS* (${inactiveMembers.length})\n\n`;
-            mentionText += `Group: *${meta.subject}*\n`;
-            mentionText += `Updated: ${new Date().toLocaleString()}\n\n`;
-            mentionText += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
-
-            const mentionedJids = [];
-            
-            for (let i = 0; i < inactiveMembers.length; i++) {
-                const member = inactiveMembers[i];
-                const dayText = member.daysSince === 'never' ? 'never active' : `${member.daysSince}d`;
-                
-                mentionText += `${i + 1}. @${member.jid.split('@')[0]}\n`;
-                mentionText += `   💬 Messages: ${member.msgCount}\n`;
-                mentionText += `   ⏰ Last Seen: ${dayText} ago\n\n`;
-                
-                mentionedJids.push(member.jid);
-            }
-
-            mentionText += `━━━━━━━━━━━━━━━━━━━━━\n`;
-            mentionText += `Total Inactive: *${inactiveMembers.length}*\n`;
-            mentionText += `\n> SUKUNA MD`;
-
-            // Send message with mentions
             await sock.sendMessage(from, {
-                text: mentionText,
-                mentions: mentionedJids
+                text,
+                mentions
             }, { quoted: msg });
 
         } catch (err) {
-            console.error('[listinactive] Error:', err.message);
-            reply(`❌ Failed to list inactive members: ${err.message}`);
+            console.error('[listinactive]', err.message);
+            reply(`❌ Error: ${err.message}`);
         }
     }
 };

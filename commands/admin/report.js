@@ -1,187 +1,155 @@
 /**
  * Report Command — Report and block WhatsApp contacts
  * Usage:
- *   .report @user            (tag a user)
- *   .report 2348012345678    (raw number)
- *   .report 2 @user          (report twice, blocks and then unblocks once)
- *   .report 3 @user          (report 3 times)
- *   .report group            (show report group subcommand)
- *   .report group <groupId>  (report a group and leave)
+ *   .report @user            - Report once and block
+ *   .report <number>         - Report by phone number and block
+ *   .report 2 @user          - Report 2 times (block on 1st, unblock after 2nd)
+ *   .report 3 @user          - Report 3 times (same block/unblock logic)
+ *   .report group <groupId>  - Report and leave a group
  */
 
-const database = require('../../utils/database');
+'use strict';
 
-function extractTarget(msg, args, startIndex = 0) {
-    // 1) Mentions
+function extractTarget(msg, args) {
+    // Check for mentions in extended text message
     const ctx = msg?.message?.extendedTextMessage?.contextInfo;
-    const mentioned = ctx?.mentionedJid?.[startIndex] || ctx?.mentionedJid?.[0];
-    if (mentioned) return mentioned;
-
-    // 2) Quoted reply
-    const quotedParticipant = ctx?.participant;
-    if (quotedParticipant && !args[0]) return quotedParticipant;
-
-    // 3) Raw number argument
-    const rawNum = args[startIndex] || args[0];
-    if (rawNum) {
-        const num = rawNum.replace(/\D/g, '');
-        if (num.length >= 6) return `${num}@s.whatsapp.net`;
+    if (ctx?.mentionedJid && ctx.mentionedJid.length > 0) {
+        return ctx.mentionedJid[0]; // First mention
     }
+
+    // Check for raw number in args
+    if (args.length > 0) {
+        const num = args[args.length - 1].replace(/\D/g, '');
+        if (num.length >= 6) {
+            return `${num}@s.whatsapp.net`;
+        }
+    }
+
+    // Check for quoted message
+    if (ctx?.participant) {
+        return ctx.participant;
+    }
+
     return null;
-}
-
-async function reportAndBlock(sock, target, count, reply) {
-    const num = target.split('@')[0].split(':')[0];
-    
-    try {
-        // Report the contact 'count' times
-        for (let i = 0; i < count; i++) {
-            try {
-                await sock.reportContact(target);
-                console.log(`[REPORT] Reported ${num} (${i + 1}/${count})`);
-            } catch (e) {
-                console.log(`[REPORT] Report attempt ${i + 1} failed: ${e.message}`);
-            }
-            
-            // Small delay between reports
-            if (i < count - 1) {
-                await new Promise(r => setTimeout(r, 500));
-            }
-        }
-
-        // Block after first report
-        try {
-            await sock.updateBlockStatus(target, 'block');
-            console.log(`[REPORT] Blocked ${num}`);
-        } catch (e) {
-            console.log(`[REPORT] Block failed: ${e.message}`);
-        }
-
-        // If count is 2 or more, unblock after count-1 reports
-        if (count >= 2) {
-            await new Promise(r => setTimeout(r, 1000));
-            try {
-                await sock.updateBlockStatus(target, 'unblock');
-                console.log(`[REPORT] Unblocked ${num} (count=${count})`);
-            } catch (e) {
-                console.log(`[REPORT] Unblock failed: ${e.message}`);
-            }
-        }
-
-        // Store report count in database
-        if (!database.data.reports) database.data.reports = {};
-        database.data.reports[num] = (database.data.reports[num] || 0) + count;
-        database.save('data');
-
-        return {
-            success: true,
-            num,
-            count,
-            blocked: count === 1
-        };
-    } catch (err) {
-        console.error('[REPORT]', err);
-        throw err;
-    }
 }
 
 module.exports = {
     name: 'report',
     aliases: ['reportuser', 'reportcontact'],
-    description: 'Report a WhatsApp contact to WhatsApp and optionally block them',
+    description: 'Report a contact and optionally block them',
     category: 'admin',
-    async execute({ sock, msg, args, reply, isOwner, isGroupAdmin, from, sender }) {
+
+    async execute({ sock, msg, args, reply, isOwner, isGroupAdmin, from, sender, isGroup }) {
         try {
-            // Check permissions
-            if (!isOwner && !isGroupAdmin) {
-                return reply('🛡️ *Admin Only!*\n\n❌ Only group admins or the bot owner can report contacts.');
+            // Check if admin or owner
+            if (!isOwner && !isGroupAdmin && isGroup) {
+                return reply('❌ *Admin Only!*\n\nYou need to be a group admin to use this command.');
             }
 
-            // Handle .report group subcommand
-            if (args[0] && args[0].toLowerCase() === 'group') {
+            const firstArg = args[0];
+
+            // Handle group report
+            if (firstArg && firstArg.toLowerCase() === 'group') {
                 const groupId = args[1];
                 if (!groupId) {
-                    return reply(
-                        `╔══════════════════════════════╗\n` +
-                        `║  📋 *REPORT GROUP*             ║\n` +
-                        `╚══════════════════════════════╝\n\n` +
-                        `*Usage:*\n` +
-                        `▸ .report group <groupId>\n\n` +
-                        `_Reports the group to WhatsApp and leaves._`
-                    );
+                    return reply('❌ Usage: .report group <groupId>');
                 }
 
                 try {
-                    // Report the group
+                    await sock.sendMessage(from, { react: { text: '⏳', key: msg.key } }).catch(() => {});
+                    
+                    // Report group
                     await sock.reportGroup(groupId);
-                    console.log(`[REPORT] Reported group ${groupId}`);
+                    console.log(`[report] Reported group: ${groupId}`);
 
-                    // Leave the group
+                    // Leave group
                     await sock.groupLeave(groupId);
-                    console.log(`[REPORT] Left group ${groupId}`);
+                    console.log(`[report] Left group: ${groupId}`);
 
-                    return reply(
-                        `╔══════════════════════════════╗\n` +
-                        `║  📋 *GROUP REPORTED*           ║\n` +
-                        `╚══════════════════════════════╝\n\n` +
-                        `✅ Group has been reported to WhatsApp.\n` +
-                        `👋 Bot has left the group.`
-                    );
-                } catch (err) {
-                    console.error('[REPORT GROUP]', err);
-                    return reply(`❌ Failed to report group: ${err.message}`);
+                    await sock.sendMessage(from, { react: { text: '✅', key: msg.key } }).catch(() => {});
+                    reply(`✅ *Reported and left group* ${groupId}`);
+                } catch (e) {
+                    console.error('[report] Group report error:', e.message);
+                    reply(`❌ Error: ${e.message}`);
                 }
+                return;
             }
 
-            // Parse report count (default 1)
-            let count = 1;
-            let targetIndex = 0;
+            // Determine report count (default 1)
+            let reportCount = 1;
+            let targetArgIndex = 0;
 
-            const firstArg = args[0];
-            if (firstArg && !isNaN(firstArg) && parseInt(firstArg) > 0) {
-                count = Math.min(parseInt(firstArg), 10); // Max 10 reports
-                targetIndex = 1;
+            if (firstArg && /^\d+$/.test(firstArg)) {
+                reportCount = parseInt(firstArg);
+                targetArgIndex = 1;
             }
 
-            // Extract target from mentions, reply, or raw number
-            let target = extractTarget(msg, args, targetIndex);
-            
+            // Extract target contact
+            const target = extractTarget(msg, args.slice(targetArgIndex));
+
             if (!target) {
-                return reply(
-                    `╔══════════════════════════════╗\n` +
-                    `║  📋 *REPORT COMMAND*           ║\n` +
-                    `╚══════════════════════════════╝\n\n` +
-                    `*Usage:*\n` +
-                    `▸ .report @user — report and block\n` +
-                    `▸ .report 2 @user — report 2x (block then unblock)\n` +
-                    `▸ .report 3345678901 — raw number\n` +
-                    `▸ .report group <id> — report group and leave\n\n` +
-                    `_Higher counts will still result in blocking after first report,\n` +
-                    `then unblocking after count reaches 2+._`
-                );
+                return reply('❌ *Usage:*\n\n.report @user\n.report 2348012345678\n.report 2 @user\n.report 3 @user\n\n.report group <groupId>');
             }
 
-            // Send processing message
-            await sock.sendMessage(from, { react: { text: '⏳', key: msg.key } });
+            const contactNum = target.split('@')[0];
 
-            // Execute report
-            const result = await reportAndBlock(sock, target, count, reply);
+            try {
+                await sock.sendMessage(from, { react: { text: '⏳', key: msg.key } }).catch(() => {});
 
-            // Send success message
-            const message =
-                `╔══════════════════════════════╗\n` +
-                `║  📋 *CONTACT REPORTED*        ║\n` +
-                `╚══════════════════════════════╝\n\n` +
-                `✅ *+${result.num}* has been reported ${count} time${count > 1 ? 's' : ''}.\n` +
-                `${result.blocked ? '🔒 Contact has been *blocked*.' : '🔓 Contact has been *unblocked*.'}`;
+                // Report contact multiple times
+                for (let i = 0; i < reportCount; i++) {
+                    try {
+                        await sock.reportContact(target);
+                        console.log(`[report] Reported ${contactNum} (${i + 1}/${reportCount})`);
+                    } catch (e) {
+                        console.log(`[report] Report attempt ${i + 1} failed: ${e.message}`);
+                    }
 
-            await sock.sendMessage(from, { react: { text: '✅', key: msg.key } });
-            return reply(message, { mentions: [target] });
+                    // Delay between reports
+                    if (i < reportCount - 1) {
+                        await new Promise(r => setTimeout(r, 500));
+                    }
+                }
+
+                // Block after first report
+                try {
+                    await sock.updateBlockStatus(target, 'block');
+                    console.log(`[report] Blocked ${contactNum}`);
+                } catch (e) {
+                    console.log(`[report] Block failed: ${e.message}`);
+                }
+
+                // If count >= 2, unblock after all reports
+                if (reportCount >= 2) {
+                    await new Promise(r => setTimeout(r, 1000));
+                    try {
+                        await sock.updateBlockStatus(target, 'unblock');
+                        console.log(`[report] Unblocked ${contactNum}`);
+                    } catch (e) {
+                        console.log(`[report] Unblock failed: ${e.message}`);
+                    }
+                }
+
+                await sock.sendMessage(from, { react: { text: '✅', key: msg.key } }).catch(() => {});
+
+                let statusText = `✅ *Reported ${contactNum}* (×${reportCount})\n\n`;
+                if (reportCount === 1) {
+                    statusText += '🔒 Status: Blocked';
+                } else {
+                    statusText += '🔓 Status: Block → Unblock';
+                }
+
+                reply(statusText);
+
+            } catch (err) {
+                console.error('[report]', err.message);
+                await sock.sendMessage(from, { react: { text: '❌', key: msg.key } }).catch(() => {});
+                reply(`❌ Error: ${err.message}`);
+            }
 
         } catch (err) {
-            console.error('[REPORT]', err);
-            await sock.sendMessage(from, { react: { text: '❌', key: msg.key } }).catch(() => {});
-            return reply(`❌ Failed to report: ${err.message}`);
+            console.error('[report] Execute error:', err.message);
+            reply(`❌ Error: ${err.message}`);
         }
     }
 };

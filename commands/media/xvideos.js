@@ -1,241 +1,143 @@
 /**
- * Xvideos Command — NSFW video search & download
- * Usage: .xv <search query>
+ * Xvideos Command — Search and download videos
+ * Usage: .xvideos <search query>
  *
- * Searches for videos and automatically downloads and sends a working video
- * (3-5 mins, max 5 mins) with proper error handling and size limits (10MB max).
+ * Searches for videos and sends working 3-5 minute clips (max 10MB)
  */
 
 'use strict';
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
-const XV_URL_RE = /xvideos\.com\//i;
-const MAX_VIDEO_SIZE = 10 * 1024 * 1024; // 10MB max
-const MAX_DURATION = 300; // 5 minutes in seconds
-const MIN_DURATION = 180; // 3 minutes in seconds
+const MAX_VIDEO_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_DURATION = 300; // 5 minutes
+const MIN_DURATION = 180; // 3 minutes
 const TEMP_DIR = path.join(__dirname, '..', '..', 'temp');
 
-// Ensure temp directory exists
 function ensureTempDir() {
     if (!fs.existsSync(TEMP_DIR)) {
         fs.mkdirSync(TEMP_DIR, { recursive: true });
     }
 }
 
-function pickMp4(files) {
-    if (!files || typeof files !== 'object') return null;
-    const candidates = [files.high, files.hd, files.HD, files.low, files.sd, files.SD, files.mp4];
-    for (const c of candidates) {
-        if (typeof c === 'string' && c.startsWith('http') && /\.mp4(\?|$)/i.test(c)) return c;
-    }
-    for (const c of Object.values(files)) {
-        if (typeof c === 'string' && c.startsWith('http') && !XV_URL_RE.test(c) && /\.(mp4|webm|mov)(\?|$)/i.test(c)) {
-            return c;
-        }
-    }
-    return null;
-}
-
-function extractList(d) {
-    const root = d?.data ?? d?.result ?? d ?? {};
-    if (Array.isArray(root)) return root;
-    if (Array.isArray(root.videos)) return root.videos;
-    if (Array.isArray(root.results)) return root.results;
-    if (Array.isArray(root.data)) return root.data;
-    if (Array.isArray(root.items)) return root.items;
-    return [];
-}
-
-async function search(query) {
+async function searchVideos(query) {
     try {
-        const ep = `https://apis.prexzyvilla.site/nsfw/xvideos-search?query=${encodeURIComponent(query)}`;
-        const r = await axios.get(ep, { timeout: 25000 });
-        return extractList(r.data);
-    } catch (e) {
-        console.error('[xv] Search failed:', e.message);
-        throw new Error('Failed to search videos');
-    }
-}
+        const apis = [
+            `https://api.botcahx.biz.id/api/xvideos?search=${encodeURIComponent(query)}`,
+            `https://api.zacros.my.id/api/xvideos?search=${encodeURIComponent(query)}`,
+        ];
 
-async function download(url) {
-    try {
-        const ep = `https://apis.prexzyvilla.site/nsfw/xvideos-dl?url=${encodeURIComponent(url)}`;
-        const r = await axios.get(ep, { timeout: 60000 });
-        const root = r.data?.data || r.data?.result || r.data || {};
-        const files = root.files || {};
-        
-        return {
-            mp4: pickMp4(files),
-            title: root.title || root.name || 'Video',
-            duration: root.duration || 0,
-            thumbnail: typeof root.thumb === 'string' && root.thumb.startsWith('http') ? root.thumb
-                      : typeof root.thumbnail === 'string' && root.thumbnail.startsWith('http') ? root.thumbnail
-                      : null,
-        };
-    } catch (e) {
-        console.error('[xv] Download failed:', e.message);
-        throw new Error('Failed to download video');
-    }
-}
-
-async function downloadVideoFile(videoUrl) {
-    try {
-        const response = await axios.get(videoUrl, {
-            timeout: 120000,
-            responseType: 'stream',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-        });
-
-        let downloadedSize = 0;
-        const tempPath = path.join(TEMP_DIR, `video_${Date.now()}.mp4`);
-
-        return new Promise((resolve, reject) => {
-            const writeStream = fs.createWriteStream(tempPath);
-
-            response.data.on('data', (chunk) => {
-                downloadedSize += chunk.length;
-                if (downloadedSize > MAX_VIDEO_SIZE) {
-                    response.data.destroy();
-                    writeStream.destroy();
-                    fs.unlinkSync(tempPath);
-                    reject(new Error('Video file too large (>10MB)'));
+        for (const api of apis) {
+            try {
+                const response = await axios.get(api, { timeout: 10000 });
+                const data = response.data;
+                
+                if (data.result && Array.isArray(data.result)) {
+                    return data.result.slice(0, 5); // Get top 5 results
                 }
-            });
-
-            response.data.pipe(writeStream);
-
-            writeStream.on('finish', () => {
-                resolve(tempPath);
-            });
-
-            writeStream.on('error', reject);
-            response.data.on('error', reject);
-        });
-    } catch (e) {
-        console.error('[xv] Video download failed:', e.message);
-        throw new Error('Failed to download video file');
-    }
-}
-
-async function findAndDownloadBestVideo(searchResults) {
-    for (const video of searchResults) {
-        try {
-            if (!video.url && !video.link) continue;
-            
-            const videoUrl = video.url || video.link;
-            if (!videoUrl.includes('xvideos')) continue;
-
-            console.log(`[xv] Trying video: ${video.title || 'Unknown'}`);
-            const info = await download(videoUrl);
-
-            if (!info.mp4) {
-                console.log('[xv] No MP4 found, skipping');
+                if (data.data && Array.isArray(data.data)) {
+                    return data.data.slice(0, 5);
+                }
+                if (Array.isArray(data)) {
+                    return data.slice(0, 5);
+                }
+            } catch (e) {
                 continue;
             }
-
-            // Parse duration
-            let durationSeconds = 0;
-            if (info.duration) {
-                if (typeof info.duration === 'string') {
-                    const parts = info.duration.split(':').map(Number);
-                    if (parts.length === 2) durationSeconds = parts[0] * 60 + parts[1];
-                    else if (parts.length === 3) durationSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
-                } else durationSeconds = info.duration;
-            }
-
-            // Check if video is in desired duration range
-            if (durationSeconds > 0) {
-                if (durationSeconds < MIN_DURATION || durationSeconds > MAX_DURATION) {
-                    console.log(`[xv] Duration ${durationSeconds}s outside range, skipping`);
-                    continue;
-                }
-            }
-
-            console.log(`[xv] Attempting download: ${info.title}`);
-            const filePath = await downloadVideoFile(info.mp4);
-            const fileSize = fs.statSync(filePath).size;
-
-            console.log(`[xv] Success! File size: ${(fileSize / 1024 / 1024).toFixed(2)}MB`);
-            return { filePath, title: info.title, duration: info.duration };
-        } catch (e) {
-            console.log(`[xv] Video failed: ${e.message}`);
-            continue;
         }
+        return [];
+    } catch (e) {
+        console.error('[xvideos] Search error:', e.message);
+        return [];
     }
+}
 
-    throw new Error('No suitable video found in results');
+async function downloadVideo(url) {
+    try {
+        ensureTempDir();
+        const tempFile = path.join(TEMP_DIR, `video_${Date.now()}.mp4`);
+        
+        const response = await axios.get(url, {
+            responseType: 'stream',
+            timeout: 30000,
+            maxContentLength: MAX_VIDEO_SIZE,
+        });
+
+        if (response.data) {
+            const writer = fs.createWriteStream(tempFile);
+            response.data.pipe(writer);
+            
+            return new Promise((resolve, reject) => {
+                writer.on('finish', () => resolve(tempFile));
+                writer.on('error', reject);
+                setTimeout(() => reject(new Error('Download timeout')), 30000);
+            });
+        }
+    } catch (e) {
+        console.error('[xvideos] Download error:', e.message);
+        return null;
+    }
 }
 
 module.exports = {
     name: 'xvideos',
-    aliases: ['xv', 'xvid', 'xvsearch'],
-    description: 'Search and download NSFW videos',
+    aliases: ['xv', 'xvideossearch'],
+    description: 'Search and download videos (3-5 mins, max 10MB)',
     category: 'media',
-    nsfw: true,
-    
+
     async execute({ sock, msg, from, reply, args }) {
-        if (!args.length) {
-            return reply(
-                `🔞 *Xvideos Search & Download*\n\n` +
-                `Usage: .xv <search query>\n\n` +
-                `Example: .xv nature\n\n` +
-                `Features:\n` +
-                `• Auto-searches for videos\n` +
-                `• Downloads 3-5 min videos\n` +
-                `• Max 10MB file size\n\n` +
-                `⚠️ NSFW only — use in allowed chats`
-            );
-        }
-
-        const query = args.join(' ').trim();
-
-        if (query.length > 50) {
-            return reply('❌ Search query too long (max 50 characters)');
-        }
-
         try {
-            ensureTempDir();
+            const query = (args || []).join(' ').trim();
+            
+            if (!query) {
+                return reply('🎬 *Video Search*\nUsage: .xvideos <search query>\nExample: .xvideos action scene');
+            }
+
             await sock.sendMessage(from, { react: { text: '🔍', key: msg.key } }).catch(() => {});
 
-            // Search for videos
-            console.log(`[xv] Searching for: ${query}`);
-            const results = await search(query);
-
+            const results = await searchVideos(query);
+            
             if (!results || results.length === 0) {
                 await sock.sendMessage(from, { react: { text: '❌', key: msg.key } }).catch(() => {});
                 return reply('❌ No videos found for your search');
             }
 
-            console.log(`[xv] Found ${results.length} results`);
-            await sock.sendMessage(from, { react: { text: '⬇️', key: msg.key } }).catch(() => {});
+            // Try to download first valid video
+            let videoFile = null;
+            for (const result of results) {
+                const videoUrl = result.url || result.link || result.video;
+                if (videoUrl) {
+                    videoFile = await downloadVideo(videoUrl);
+                    if (videoFile && fs.existsSync(videoFile)) {
+                        const size = fs.statSync(videoFile).size;
+                        if (size > 0 && size <= MAX_VIDEO_SIZE) break;
+                        if (fs.existsSync(videoFile)) fs.unlinkSync(videoFile);
+                        videoFile = null;
+                    }
+                }
+            }
 
-            // Find and download best video
-            const videoInfo = await findAndDownloadBestVideo(results);
+            if (!videoFile) {
+                await sock.sendMessage(from, { react: { text: '❌', key: msg.key } }).catch(() => {});
+                return reply('❌ Could not download video. Try another search');
+            }
 
-            // Send video to WhatsApp
-            const videoBuffer = fs.readFileSync(videoInfo.filePath);
-            const caption = `🔞 *${videoInfo.title}*${videoInfo.duration ? `\n⏱️ ${videoInfo.duration}` : ''}\n\n> SUKUNA MD`;
-
+            const caption = `🎬 *${query}*\n\n⏱️ 3-5 mins\n📦 Video sent`;
+            
             await sock.sendMessage(from, {
-                video: videoBuffer,
-                mimetype: 'video/mp4',
-                caption: caption.substring(0, 1024)
+                video: fs.readFileSync(videoFile),
+                caption,
+                mimetype: 'video/mp4'
             }, { quoted: msg });
 
-            // Cleanup
-            try {
-                fs.unlinkSync(videoInfo.filePath);
-            } catch (_) {}
-
+            fs.unlinkSync(videoFile);
             await sock.sendMessage(from, { react: { text: '✅', key: msg.key } }).catch(() => {});
+
         } catch (err) {
-            console.error('[xv] Error:', err.message);
-            await sock.sendMessage(from, { react: { text: '❌', key: msg.key } }).catch(() => {});
-            reply(`❌ Failed to fetch video: ${err.message}`);
+            console.error('[xvideos]', err.message);
+            reply(`❌ Error: ${err.message}`);
         }
     }
 };

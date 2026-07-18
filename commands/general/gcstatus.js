@@ -40,6 +40,8 @@ const {
     generateWAMessageContent,
     generateWAMessageFromContent,
     downloadContentFromMessage,
+    prepareWAMessageMedia,
+    generateMessageIDV2,
 } = _baileys;
 const { PassThrough } = require('stream');
 
@@ -358,16 +360,60 @@ function unwrapQuotedDeep(qm) {
     return qm;
 }
 
+// Build non-blue link preview with image thumbnail
+async function createImageLinkPreview(sock, url, title, description, imageBuffer) {
+    try {
+        let thumbnail = null;
+        if (imageBuffer) {
+            try {
+                const prepared = await prepareWAMessageMedia(
+                    { image: imageBuffer },
+                    { upload: sock.waUploadToServer, mediaTypeOverride: 'thumbnail-link' }
+                );
+                const hq = prepared.imageMessage;
+                thumbnail = {
+                    thumbnailDirectPath: hq?.directPath,
+                    mediaKey: hq?.mediaKey,
+                    mediaKeyTimestamp: hq?.mediaKeyTimestamp,
+                    thumbnailWidth: hq?.width,
+                    thumbnailHeight: hq?.height,
+                    thumbnailSha256: hq?.fileSha256,
+                    thumbnailEncSha256: hq?.fileEncSha256,
+                    jpegThumbnail: hq?.jpegThumbnail ? Buffer.from(hq.jpegThumbnail) : undefined,
+                };
+            } catch (err) {
+                console.error('[thumbnail prepare]', err.message);
+            }
+        }
+
+        return {
+            extendedTextMessage: {
+                text: url,
+                matchedText: url,
+                canonicalUrl: url,
+                title: title || 'Link',
+                description: description || url,
+                previewType: 5, // IMAGE - not blue
+                ...(thumbnail || { jpegThumbnail: undefined }),
+            }
+        };
+    } catch (err) {
+        console.error('[image preview]', err.message);
+        return null;
+    }
+}
+
 // ─── shared exports (used by gcstatusdm.js) ──────────────────────────────────
 module.exports.downloadMedia        = downloadMedia;
 module.exports.fetchLinkPreview     = fetchLinkPreview;
-module.exports.postGroupStatus      = postGroupStatus;
-module.exports.postRelayGroupStatus = postRelayGroupStatus;
-module.exports.encodeOpus           = encodeOpus;
-module.exports.getQuotedCtx         = getQuotedCtx;
-module.exports.unwrapQuotedDeep     = unwrapQuotedDeep;
-module.exports.TEXT_BG_COLOR        = TEXT_BG_COLOR;
-module.exports.baileysSource        = _baileysSource;
+module.exports.postGroupStatus          = postGroupStatus;
+module.exports.postRelayGroupStatus     = postRelayGroupStatus;
+module.exports.encodeOpus               = encodeOpus;
+module.exports.getQuotedCtx             = getQuotedCtx;
+module.exports.unwrapQuotedDeep         = unwrapQuotedDeep;
+module.exports.createImageLinkPreview   = createImageLinkPreview;
+module.exports.TEXT_BG_COLOR            = TEXT_BG_COLOR;
+module.exports.baileysSource            = _baileysSource;
 
 // ─── command ─────────────────────────────────────────────────────────────────
 
@@ -556,15 +602,53 @@ module.exports = Object.assign(module.exports, {
             const isUrl = /https?:\/\//i.test(caption);
 
             if (isUrl) {
-                // Fetch real OG metadata + full-res image so the preview is crisp
+                // Fetch real OG metadata + full-res image
                 const preview = await fetchLinkPreview(caption);
-                await postGroupStatus(sock, from, {
-                    text:               caption,
-                    richPreview:        true,
-                    ...(preview.title        ? { previewTitle:       preview.title }       : {}),
-                    ...(preview.description  ? { previewDescription: preview.description } : {}),
-                    ...(preview.imageBuffer  ? { previewImage:       preview.imageBuffer } : {}),
-                });
+                
+                // Create image-based link preview (not blue)
+                const imagePrev = await createImageLinkPreview(
+                    sock,
+                    caption,
+                    preview.title || 'Link',
+                    preview.description || caption,
+                    preview.imageBuffer
+                );
+
+                if (imagePrev) {
+                    // Send as extendedTextMessage via relay for image preview
+                    const messageId = generateMessageIDV2(sock.user.id);
+                    const message = imagePrev;
+                    const inner = { ...message };
+                    attachChannelCtxToInner(inner);
+
+                    const secret = crypto.randomBytes(32);
+                    const msg_relay = generateWAMessageFromContent(
+                        from,
+                        {
+                            messageContextInfo: { messageSecret: secret },
+                            groupStatusMessageV2: {
+                                message: { ...inner, messageContextInfo: { messageSecret: secret } },
+                            },
+                        },
+                        {}
+                    );
+
+                    const statusJidList = await getGroupParticipantJids(sock, from);
+                    await sock.relayMessage(from, msg_relay.message, {
+                        messageId: msg_relay.key.id,
+                        statusJidList,
+                        additionalAttributes: { messageId: msg_relay.key.id },
+                    });
+                } else {
+                    // Fallback to regular text if image preview fails
+                    await postGroupStatus(sock, from, {
+                        text:        caption,
+                        richPreview: true,
+                        ...(preview.title        ? { previewTitle:       preview.title }       : {}),
+                        ...(preview.description  ? { previewDescription: preview.description } : {}),
+                        ...(preview.imageBuffer  ? { previewImage:       preview.imageBuffer } : {}),
+                    });
+                }
             } else {
                 await postGroupStatus(sock, from, {
                     text:            caption,

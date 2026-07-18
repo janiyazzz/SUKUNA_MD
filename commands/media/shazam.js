@@ -3,20 +3,9 @@ const path = require('path');
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
-const FormData = require('form-data');
-const fetch = require('node-fetch');
 const axios = require('axios');
 const yts = require('yt-search');
-
-// ACR Cloud credentials (add to config or env)
-const ACR_CLOUD = {
-    host: process.env.ACR_HOST || 'identify-us-west-2.acrcloud.com',
-    endpoint: '/v1/identify',
-    access_key: process.env.ACR_KEY || '',
-    access_secret: process.env.ACR_SECRET || '',
-    data_type: 'audio',
-    signature_version: '1'
-};
+const { downloadContentFromMessage } = require('@crysnovax/baileys');
 
 // Track active shazam sessions for download replies
 const activeShazamSessions = new Map();
@@ -44,158 +33,218 @@ function ensureTempDir() {
     return tempDir;
 }
 
-// Extract 15 seconds of audio for fingerprinting
-async function extractAudioSample(inputFile, outputFile) {
-    const cmd = `ffmpeg -y -i "${inputFile}" -ss 0 -t 15 -acodec libmp3lame -ar 44100 -ac 1 -b:a 128k "${outputFile}"`;
-    await execAsync(cmd);
-    if (!fs.existsSync(outputFile)) throw new Error('FFmpeg failed to create output file');
-    return fs.readFileSync(outputFile);
-}
-
-// Sign request for ACR Cloud
-function sign(stringToSign, secret) {
-    const crypto = require('crypto');
-    return crypto.createHmac('sha1', secret)
-        .update(Buffer.from(stringToSign, 'utf8'))
-        .digest()
-        .toString('base64');
-}
-
-// Build string to sign for ACR Cloud
-function buildStringToSign(method, endpoint, access_key, data_type, signature_version, timestamp) {
-    return [method, endpoint, access_key, data_type, signature_version, timestamp].join('\n');
-}
-
-// Search YouTube for song
-async function searchYouTube(query) {
+// Search for song using multiple APIs
+async function searchSongInfo(query) {
     try {
-        const results = await yts(query);
-        return results.videos[0] || null;
+        // Try Genius API first (free, no auth required for basic search)
+        const geniusResult = await axios.get('https://api.genius.com/search', {
+            params: { q: query },
+            timeout: 5000
+        }).catch(() => null);
+
+        if (geniusResult?.data?.response?.hits?.length > 0) {
+            const hit = geniusResult.data.response.hits[0].result;
+            return {
+                title: hit.title,
+                artist: hit.primary_artist?.name || 'Unknown',
+                album: hit.album?.name || 'N/A',
+                url: hit.url,
+                thumbnail: hit.song_art_image_thumbnail_url,
+                genius: hit.url
+            };
+        }
+
+        // Fallback to YouTube search
+        const ytResult = await yts(query);
+        if (ytResult?.videos?.length > 0) {
+            const video = ytResult.videos[0];
+            return {
+                title: video.title,
+                artist: video.author?.name || 'Unknown',
+                album: 'YouTube',
+                url: video.url,
+                thumbnail: video.thumbnail,
+                youtube: video.url
+            };
+        }
+
+        return null;
     } catch (err) {
-        console.error('[shazam] YouTube search failed:', err.message);
+        console.error('[search song]', err.message);
         return null;
     }
 }
 
-// Download audio from fallback APIs
-async function downloadAudio(url) {
-    for (const api of FALLBACK_AUDIO_APIS(url)) {
+// Try to identify song using Shazam-like service
+async function identifySong(audioFile) {
+    try {
+        // Use audd.io free API (no auth required for basic use)
+        const form = new (require('form-data'))();
+        form.append('file', fs.createReadStream(audioFile));
+
+        const result = await axios.post('https://api.audd.io/', form, {
+            headers: form.getHeaders(),
+            timeout: 10000
+        }).catch(() => null);
+
+        if (result?.data?.result) {
+            const r = result.data.result;
+            return {
+                title: r.title || 'Unknown',
+                artist: r.artist || 'Unknown',
+                album: r.album || 'N/A',
+                release_date: r.release_date || 'N/A',
+                duration: r.duration ? Math.floor(r.duration) + 's' : 'N/A',
+                url: r.url || null,
+                spotify: r.spotify_id ? 'spotify.com/track/' + r.spotify_id : null
+            };
+        }
+
+        return null;
+    } catch (err) {
+        console.error('[audd identification]', err.message);
+        return null;
+    }
+}
+
+// Download audio from YouTube
+async function downloadAudio(ytUrl) {
+    for (const api of FALLBACK_AUDIO_APIS(ytUrl)) {
         try {
-            const { data } = await axios.get(api, {
-                timeout: 20000,
+            const { data } = await axios.get(api, { 
+                timeout: 10000,
                 headers: { 'User-Agent': 'Mozilla/5.0' }
             });
-            const downloadUrl = data?.result?.downloadUrl || data?.result?.url || data?.download;
-            if (!downloadUrl) continue;
             
-            const buffer = await axios.get(downloadUrl, {
-                responseType: 'arraybuffer',
-                timeout: 60000,
-                headers: { 'User-Agent': 'Mozilla/5.0' }
-            });
-            console.log('[shazam] Downloaded audio from:', api);
-            return Buffer.from(buffer.data);
+            const downloadUrl = data?.result?.downloadUrl || 
+                               data?.data?.downloadUrl ||
+                               data?.download ||
+                               data?.url ||
+                               data?.link;
+
+            if (downloadUrl) {
+                const audio = await axios.get(downloadUrl, {
+                    responseType: 'arraybuffer',
+                    timeout: 30000,
+                    headers: { 'User-Agent': 'Mozilla/5.0' }
+                });
+                return Buffer.from(audio.data);
+            }
         } catch (err) {
-            console.error('[shazam] Audio download failed:', err.message);
+            console.error('[download audio]', err.message);
         }
     }
     return null;
 }
 
-// Download video from fallback APIs
-async function downloadVideo(url) {
-    for (const api of FALLBACK_VIDEO_APIS(url)) {
+// Download video from YouTube
+async function downloadVideo(ytUrl) {
+    for (const api of FALLBACK_VIDEO_APIS(ytUrl)) {
         try {
-            const { data } = await axios.get(api, {
-                timeout: 20000,
+            const { data } = await axios.get(api, { 
+                timeout: 10000,
                 headers: { 'User-Agent': 'Mozilla/5.0' }
             });
-            const videoUrl = data?.result?.downloadUrl || data?.result?.url || data?.download;
-            if (!videoUrl) continue;
-            console.log('[shazam] Video URL found:', api);
-            return videoUrl;
+            
+            const downloadUrl = data?.result?.downloadUrl || 
+                               data?.data?.downloadUrl ||
+                               data?.download ||
+                               data?.url ||
+                               data?.link;
+
+            if (downloadUrl) {
+                return downloadUrl;
+            }
         } catch (err) {
-            console.error('[shazam] Video download failed:', err.message);
+            console.error('[download video]', err.message);
         }
     }
     return null;
 }
 
-// Cleanup temporary files
+// Handle download reply
+async function handleShazamReply(sock, msg, reply) {
+    const sessionKey = msg.from + ':' + msg.sender;
+    const session = activeShazamSessions.get(sessionKey);
+
+    if (!session) return false;
+
+    const choice = msg.body?.trim().toLowerCase();
+    
+    if (!['1', '2', 'audio', 'video'].includes(choice)) {
+        return false;
+    }
+
+    activeShazamSessions.delete(sessionKey);
+
+    const isAudio = choice === '1' || choice === 'audio';
+
+    try {
+        if (!session.ytUrl) {
+            return await reply('No download link available');
+        }
+
+        if (isAudio) {
+            await sock.sendMessage(msg.from, { react: { text: '⬇️', key: msg.key } }).catch(() => {});
+            const audio = await downloadAudio(session.ytUrl);
+            
+            if (audio) {
+                await sock.sendMessage(msg.from, {
+                    audio: audio,
+                    mimetype: 'audio/mpeg',
+                    fileName: session.title + '.mp3',
+                    ptt: false
+                }, { quoted: msg });
+            } else {
+                await reply('Failed to download audio');
+            }
+        } else {
+            await sock.sendMessage(msg.from, { react: { text: '⬇️', key: msg.key } }).catch(() => {});
+            const videoUrl = await downloadVideo(session.ytUrl);
+            
+            if (videoUrl) {
+                await sock.sendMessage(msg.from, {
+                    video: { url: videoUrl },
+                    caption: 'Video: ' + session.title
+                }, { quoted: msg });
+            } else {
+                await reply('Failed to download video');
+            }
+        }
+
+        await sock.sendMessage(msg.from, { react: { text: '✨', key: msg.key } }).catch(() => {});
+        return true;
+    } catch (err) {
+        console.error('[shazam reply]', err.message);
+        await reply('Error downloading media: ' + err.message);
+        return true;
+    }
+}
+
+// Cleanup files
 function cleanupFiles(files) {
     files.forEach(file => {
         try {
-            if (file && fs.existsSync(file)) fs.unlinkSync(file);
-        } catch {}
-    });
-}
-
-// Handle download replies
-async function handleShazamReply(sock, msg, reply) {
-    const sessionKey = msg.chat + ':' + msg.sender;
-    const session = activeShazamSessions.get(sessionKey);
-    
-    if (!session) return false;
-    
-    const messageId = msg.quoted?.key?.id || msg.message?.extendedTextMessage?.contextInfo?.stanzaId;
-    if (messageId !== session.messageId) return false;
-    
-    activeShazamSessions.delete(sessionKey);
-    
-    const choice = msg.body?.toLowerCase?.().trim();
-    if (!['1', '2', 'audio', 'video'].includes(choice)) {
-        await reply('Reply with 1 for audio or 2 for video');
-        return true;
-    }
-    
-    const downloadAudio = choice === '1' || choice === 'audio';
-    
-    try {
-        if (!session.ytUrl) return reply('No YouTube link available');
-        
-        if (downloadAudio) {
-            await reply('Downloading audio...');
-            const audioBuffer = await downloadAudio(session.ytUrl);
-            if (!audioBuffer) return reply('Failed to download audio');
-            
-            await sock.sendMessage(msg.chat, {
-                audio: audioBuffer,
-                mimetype: 'audio/mpeg',
-                fileName: session.title + '.mp3',
-                ptt: false
-            }, { quoted: msg });
-        } else {
-            await reply('Downloading video...');
-            const videoUrl = await downloadVideo(session.ytUrl);
-            if (!videoUrl) return reply('Failed to download video');
-            
-            await sock.sendMessage(msg.chat, {
-                video: { url: videoUrl },
-                caption: '_𓄄 ' + session.title + '_'
-            }, { quoted: msg });
+            if (file && fs.existsSync(file)) {
+                fs.unlinkSync(file);
+            }
+        } catch (err) {
+            console.error('[cleanup]', err.message);
         }
-        
-        await sock.sendMessage(msg.chat, {
-            react: { text: '✨', key: msg.key }
-        }).catch(() => {});
-    } catch (err) {
-        await reply('Download failed: ' + err.message);
-    }
-    
-    return true;
+    });
 }
 
 module.exports = {
     name: 'shazam',
     alias: ['whatmusic', 'identify', 'findaudio'],
-    desc: 'Identify music from audio/video and download it',
+    desc: 'Identify music from replied audio/video message',
     category: 'Media',
-    
+    usage: '.shazam',
     handleShazamReply,
-    
+
     execute: async (context) => {
         const { sock, msg, from, reply } = context;
-        
+
         // Extract contextInfo from the current message
         const ctx =
             msg.message?.extendedTextMessage?.contextInfo ||
@@ -215,11 +264,7 @@ module.exports = {
         const hasVideo = quotedMessage.videoMessage;
 
         if (!hasAudio && !hasVideo) {
-            return reply('Reply to audio or video with .shazam\n\nAliases: .whatmusic, .identify, .findaudio');
-        }
-
-        if (!ACR_CLOUD.access_key || !ACR_CLOUD.access_secret) {
-            return reply('ACR Cloud not configured. Set ACR_KEY and ACR_SECRET env vars');
+            return reply('Reply to audio or video with .shazam');
         }
 
         const tempDir = ensureTempDir();
@@ -227,13 +272,12 @@ module.exports = {
         let sampleFile = null;
 
         try {
-            // Download media
+            // React with searching emoji
             await sock.sendMessage(from, {
                 react: { text: '🔍', key: msg.key }
             }).catch(() => {});
 
-            const { downloadContentFromMessage } = require('@crysnovax/baileys');
-            
+            // Download media
             let media = null;
             if (hasAudio) {
                 const stream = await downloadContentFromMessage(quotedMessage.audioMessage, 'audio');
@@ -246,6 +290,7 @@ module.exports = {
                 for await (const chunk of stream) chunks.push(chunk);
                 media = Buffer.concat(chunks);
             }
+
             if (!media || media.length === 0) {
                 return reply('Failed to download media');
             }
@@ -253,118 +298,81 @@ module.exports = {
             const ext = hasVideo ? 'mp4' : 'mp3';
             inputFile = path.join(tempDir, 'shazam_' + Date.now() + '.' + ext);
             fs.writeFileSync(inputFile, media);
-            
-            // Extract audio sample
-            sampleFile = path.join(tempDir, 'sample_' + Date.now() + '.mp3');
-            const sampleBuffer = await extractAudioSample(inputFile, sampleFile);
-            
-            // Sign ACR Cloud request
-            const timestamp = Math.floor(Date.now() / 1000);
-            const stringToSign = buildStringToSign(
-                'POST',
-                ACR_CLOUD.endpoint,
-                ACR_CLOUD.access_key,
-                ACR_CLOUD.data_type,
-                ACR_CLOUD.signature_version,
-                timestamp
-            );
-            const signature = sign(stringToSign, ACR_CLOUD.access_secret);
-            
-            // Send to ACR Cloud
-            const form = new FormData();
-            form.append('sample', sampleBuffer, { filename: 'sample.mp3', contentType: 'audio/mpeg' });
-            form.append('sample_bytes', sampleBuffer.length);
-            form.append('access_key', ACR_CLOUD.access_key);
-            form.append('data_type', ACR_CLOUD.data_type);
-            form.append('signature_version', ACR_CLOUD.signature_version);
-            form.append('signature', signature);
-            form.append('timestamp', timestamp);
-            
-            const apiUrl = 'http://' + ACR_CLOUD.host + ACR_CLOUD.endpoint;
-            const response = await fetch(apiUrl, {
-                method: 'POST',
-                body: form,
-                timeout: 30000
-            });
-            
-            const result = await response.json();
-            
-            if (result.status?.code !== 0) {
-                return reply('Song not identified: ' + (result.status?.msg || 'Unknown error'));
+
+            // Extract audio sample for identification
+            sampleFile = inputFile.replace(/\.[^.]+$/, '_sample.mp3');
+            await execAsync(`ffmpeg -y -i "${inputFile}" -ss 0 -t 15 -acodec libmp3lame -ar 44100 -ac 1 -b:a 128k "${sampleFile}"`);
+
+            if (!fs.existsSync(sampleFile)) {
+                return reply('Failed to process audio');
             }
-            
-            if (!result.metadata?.music?.length) {
-                return reply('No match found');
+
+            // Try to identify the song
+            const songInfo = await identifySong(sampleFile);
+
+            if (!songInfo) {
+                return reply('Could not identify song. Try clearer audio');
             }
-            
-            // Extract song info
-            const song = result.metadata.music[0];
-            const artists = song.artists?.map(a => a.name).join(', ') || 'Unknown Artist';
-            const title = song.title || 'Unknown Title';
-            const album = song.album?.name || 'Unknown Album';
-            const releaseDate = song.release_date || 'N/A';
-            const duration = song.duration_ms ? Math.floor(song.duration_ms / 1000) + 's' : 'N/A';
-            
-            // Search YouTube
-            const ytResult = await searchYouTube(title + ' ' + artists);
-            const ytUrl = ytResult?.url || null;
-            const thumbnail = ytResult?.thumbnail || song.album?.cover || 'https://files.catbox.moe/5uli5p.jpeg';
-            
-            // Build response message
-            let infoText = '╭─❍ *𓄄 SONG IDENTIFIED*\n│\n';
-            infoText += '│ 📝 *Title:* ' + title + '\n';
-            infoText += '│ 🎤 *Artist:* ' + artists + '\n';
-            infoText += '│ 💿 *Album:* ' + album + '\n';
-            infoText += '│ 📅 *Released:* ' + releaseDate + '\n';
-            infoText += '│ ☬ *Duration:* ' + duration + '\n';
-            infoText += '│\n│ *➫ Listen On:*\n';
-            
-            if (song.external_metadata?.spotify?.track?.id) {
-                infoText += '│   🎵 spotify.com/track/' + song.external_metadata.spotify.track.id + '\n';
-            }
-            if (song.external_metadata?.youtube?.vid) {
-                infoText += '│    𓊈𝑽꯭𝑰꯭𝑷ࠡࠡࠡࠡࠢ𓊉 youtube.com/watch?v=' + song.external_metadata.youtube.vid + '\n';
-            }
+
+            // Search for YouTube link
+            const searchQuery = songInfo.title + ' ' + songInfo.artist;
+            const ytInfo = await searchSongInfo(searchQuery);
+
+            const title = songInfo.title || 'Unknown Song';
+            const artist = songInfo.artist || 'Unknown Artist';
+            const album = songInfo.album || 'N/A';
+            const releaseDate = songInfo.release_date || 'N/A';
+            const duration = songInfo.duration || 'N/A';
+            const ytUrl = ytInfo?.youtube || ytInfo?.url || null;
+            const thumbnail = ytInfo?.thumbnail || 'https://files.catbox.moe/5uli5p.jpeg';
+
+            // Build info text
+            let infoText = `╭─❍ 𝙎𝙇𝙂 𝙄𝘿𝙀𝙉𝙏𝙄𝙁𝙄𝘌𝘋\n`;
+            infoText += `│\n`;
+            infoText += `│ 🎵 Title: ${title}\n`;
+            infoText += `│ 🎤 Artist: ${artist}\n`;
+            infoText += `│ 💿 Album: ${album}\n`;
+            infoText += `│ 📅 Released: ${releaseDate}\n`;
+            infoText += `│ ⏱️  Duration: ${duration}\n`;
+            infoText += `│\n`;
             if (ytUrl) {
-                infoText += '│   ▶️ ' + ytUrl + '\n';
+                infoText += `│ 🔗 Watch/Listen:\n`;
+                infoText += `│ ${ytUrl}\n`;
+                infoText += `│\n`;
+                infoText += `│ Reply with:\n`;
+                infoText += `│ 1️⃣  for audio\n`;
+                infoText += `│ 2️⃣  for video\n`;
             }
-            
-            infoText += '│\n│ ⚉ *Reply with:*\n';
-            infoText += '│   1 → download audio\n';
-            infoText += '│   2 → download video\n';
-            infoText += '╰──────────────────';
-            
-            // Send with thumbnail
+            infoText += `╰────────────────────`;
+
+            // Send result
             const sentMsg = await sock.sendMessage(from, {
                 image: { url: thumbnail },
                 caption: infoText
             }, { quoted: msg });
 
             // Store session for download
-            const sessionKey = from + ':' + msg.sender;
-            activeShazamSessions.set(sessionKey, {
-                messageId: sentMsg.key.id,
-                ytUrl,
-                title,
-                timestamp: Date.now()
-            });
+            if (ytUrl) {
+                const sessionKey = from + ':' + msg.sender;
+                activeShazamSessions.set(sessionKey, {
+                    messageId: sentMsg.key.id,
+                    ytUrl,
+                    title,
+                    timestamp: Date.now()
+                });
 
-            // Cleanup session after 5 minutes
-            setTimeout(() => activeShazamSessions.delete(sessionKey), 5 * 60 * 1000);
+                // Cleanup session after 5 minutes
+                setTimeout(() => activeShazamSessions.delete(sessionKey), 5 * 60 * 1000);
+            }
 
-            // React
+            // React with success
             await sock.sendMessage(from, {
                 react: { text: '🎶', key: msg.key }
             }).catch(() => {});
-            
+
         } catch (err) {
-            console.error('[shazam]', err);
-            let errorMsg = err.message;
-            if (err.message.includes('ENOENT')) errorMsg = 'FFmpeg not installed';
-            if (err.message.includes('ECONNREFUSED')) errorMsg = 'Network error';
-            if (err.message.includes('timeout')) errorMsg = 'Try clearer audio';
-            
-            return reply('Error: ' + errorMsg);
+            console.error('[shazam]', err.message);
+            await reply('Error: ' + err.message);
         } finally {
             cleanupFiles([inputFile, sampleFile]);
         }

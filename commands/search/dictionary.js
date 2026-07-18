@@ -1,5 +1,78 @@
 const axios = require('axios');
 const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+// Generate TTS audio from text
+async function generateTTS(text) {
+    try {
+        const res = await axios.get('https://api.allorigins.win/raw?url=' + encodeURIComponent(
+            `https://tts.google.com/client.updateSettings?eng=en&v=1`
+        ), { timeout: 15000 });
+        
+        const ttsUrl = `https://translate.google.com/translate_tts?client=gtx&ie=UTF-8&tl=en&q=${encodeURIComponent(text.substring(0, 200))}`;
+        const audio = await axios.get(ttsUrl, {
+            responseType: 'arraybuffer',
+            timeout: 10000,
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+        
+        return audio.data ? Buffer.from(audio.data) : null;
+    } catch (err) {
+        console.error('[tts generation]', err.message);
+        return null;
+    }
+}
+
+// Combine multiple audio buffers using ffmpeg
+async function combineAudioBuffers(audioBuffers) {
+    return new Promise((resolve) => {
+        let ffmpegPath = null;
+        try { ffmpegPath = require('ffmpeg-static'); } catch (_) { ffmpegPath = null; }
+        
+        if (!ffmpegPath || audioBuffers.length === 0) return resolve(null);
+        
+        const tempDir = path.join(__dirname, '../../tmp');
+        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+        
+        const inputFiles = audioBuffers.map((buf, i) => {
+            const file = path.join(tempDir, `audio_${Date.now()}_${i}.mp3`);
+            fs.writeFileSync(file, buf);
+            return file;
+        });
+        
+        const concatFile = path.join(tempDir, `concat_${Date.now()}.txt`);
+        const concatContent = inputFiles.map(f => `file '${f}'`).join('\n');
+        fs.writeFileSync(concatFile, concatContent);
+        
+        const args = [
+            '-hide_banner', '-loglevel', 'error',
+            '-f', 'concat', '-safe', '0', '-i', concatFile,
+            '-c', 'copy',
+            '-f', 'mp3',
+            'pipe:1'
+        ];
+        
+        const ff = spawn(ffmpegPath, args);
+        const chunks = [];
+        
+        ff.stdout.on('data', c => chunks.push(c));
+        ff.on('error', () => {
+            inputFiles.forEach(f => { try { fs.unlinkSync(f); } catch (_) {} });
+            try { fs.unlinkSync(concatFile); } catch (_) {}
+            resolve(null);
+        });
+        ff.on('close', code => {
+            inputFiles.forEach(f => { try { fs.unlinkSync(f); } catch (_) {} });
+            try { fs.unlinkSync(concatFile); } catch (_) {}
+            
+            if (code !== 0 || chunks.length === 0) return resolve(null);
+            resolve(Buffer.concat(chunks));
+        });
+        ff.stdin.on('error', () => {});
+        ff.stdin.end();
+    });
+}
 
 // Transcode MP3 to OGG/Opus for WhatsApp voice notes
 function transcodeMp3ToOpus(mp3Buffer) {
@@ -132,42 +205,52 @@ module.exports = {
             // Send text definition
             await sock.sendMessage(from, { text: responseText }, { quoted: msg });
 
-            // Download and send pronunciation audio if available
+            // Download pronunciation and generate TTS for definition and example
             if (audioUrl) {
                 try {
-                    const audioBuffer = await downloadAudio(audioUrl);
+                    const pronunciationAudio = await downloadAudio(audioUrl);
                     
-                    if (audioBuffer && audioBuffer.length > 0) {
-                        // Build caption with definition and example
-                        let audioCaption = `🎵 *${data.word}* - ${partOfSpeech}\n\n`;
-                        audioCaption += `📚 *Definition:*\n${definition}\n\n`;
-                        audioCaption += `💬 *Example:*\n${example}`;
+                    if (pronunciationAudio && pronunciationAudio.length > 0) {
+                        const audioBuffers = [pronunciationAudio];
+                        
+                        // Generate TTS for definition
+                        const definitionTTS = await generateTTS(`Definition: ${definition}`);
+                        if (definitionTTS) audioBuffers.push(definitionTTS);
+                        
+                        // Generate TTS for example
+                        const exampleTTS = await generateTTS(`Example: ${example}`);
+                        if (exampleTTS) audioBuffers.push(exampleTTS);
+                        
+                        // Combine all audio
+                        let finalAudio = audioBuffers.length > 1 
+                            ? await combineAudioBuffers(audioBuffers)
+                            : pronunciationAudio;
+                        
+                        if (!finalAudio) finalAudio = pronunciationAudio;
                         
                         // Try to transcode to OGG/Opus for voice note effect
-                        const opus = await transcodeMp3ToOpus(audioBuffer);
+                        const opus = await transcodeMp3ToOpus(finalAudio);
                         
                         if (opus && opus.length > 0) {
-                            // Send as voice note with caption
+                            // Send as voice note
                             await sock.sendMessage(from, {
                                 audio: opus,
                                 mimetype: 'audio/ogg; codecs=opus',
-                                fileName: `${data.word}_pronunciation.ogg`,
-                                caption: audioCaption,
+                                fileName: `${data.word}_definition.ogg`,
                                 ptt: true
                             }, { quoted: msg });
                         } else {
-                            // Fallback: send as regular audio file with caption
+                            // Fallback: send as regular audio file
                             await sock.sendMessage(from, {
-                                audio: audioBuffer,
+                                audio: finalAudio,
                                 mimetype: 'audio/mpeg',
-                                fileName: `${data.word}_pronunciation.mp3`,
-                                caption: audioCaption,
+                                fileName: `${data.word}_definition.mp3`,
                                 ptt: false
                             }, { quoted: msg });
                         }
                     }
                 } catch (audioErr) {
-                    console.error('[audio send]', audioErr.message);
+                    console.error('[audio composition]', audioErr.message);
                 }
             }
 

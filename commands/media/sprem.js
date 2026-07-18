@@ -16,10 +16,13 @@ module.exports = {
 
         try {
             const quoted = msg.quoted || msg;
-            const mime = quoted.mimetype || '';
-
-            // Validate media type
-            if (!/image|video|webp/.test(mime)) {
+            
+            // Check for image, video, or sticker
+            const hasImage = quoted.imageMessage;
+            const hasVideo = quoted.videoMessage;
+            const hasSticker = quoted.stickerMessage;
+            
+            if (!hasImage && !hasVideo && !hasSticker) {
                 return reply('Reply to an image, video, or sticker');
             }
 
@@ -57,10 +60,10 @@ module.exports = {
 
             // Convert to webp based on media type
             try {
-                if (/webp/.test(mime)) {
-                    // Already WebP - just copy
+                if (hasSticker) {
+                    // Already a sticker (WebP) - just copy
                     fs.copyFileSync(input, output);
-                } else if (/video/.test(mime)) {
+                } else if (hasVideo) {
                     // Video to animated sticker
                     const videoCmd = `ffmpeg -y -i "${input}" -vf "fps=15,scale=512:512:force_original_aspect_ratio=increase,crop=512:512:(iw-ow)/2:(ih-oh)/2,format=yuva420p" -c:v libwebp -lossless 0 -q:v 70 -loop 0 -an -preset default -compression_level 6 "${output}"`;
                     
@@ -74,7 +77,7 @@ module.exports = {
                             }
                         });
                     });
-                } else {
+                } else if (hasImage) {
                     // Image to sticker
                     const imgCmd = `ffmpeg -y -i "${input}" -vf "scale=512:512:force_original_aspect_ratio=increase,crop=512:512:(iw-ow)/2:(ih-oh)/2,format=yuva420p" -c:v libwebp -lossless 0 -q:v 80 -an "${output}"`;
                     

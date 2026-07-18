@@ -14,13 +14,17 @@ module.exports = {
             const { sock, msg, from, reply } = context;
 
             const quoted = msg.quoted || msg;
-            const mime = quoted.mimetype || '';
-
-            if (!mime || (!mime.includes('webp') && !mime.includes('image'))) {
-                return reply('Reply to a sticker or image');
+            
+            // Check for sticker, image, or video
+            const hasSticker = quoted.stickerMessage;
+            const hasImage = quoted.imageMessage;
+            const hasVideo = quoted.videoMessage;
+            
+            if (!hasSticker && !hasImage && !hasVideo) {
+                return reply('Reply to a sticker, image, or video');
             }
 
-            await reply('⏳ Converting sticker...');
+            await reply('⏳ Converting to GIF...');
 
             // Download media
             let mediaBuffer = null;
@@ -34,16 +38,24 @@ module.exports = {
                 return reply('Failed to download media');
             }
 
+            // Determine if we're dealing with video
+            const isVideo = hasVideo;
+            
             // Get metadata
             let metadata = null;
-            try {
-                metadata = await sharp(mediaBuffer).metadata();
-            } catch (err) {
-                console.error('[metadata]', err.message);
-                return reply('Invalid sticker format');
+            let isAnimated = false;
+            
+            if (!isVideo) {
+                try {
+                    metadata = await sharp(mediaBuffer).metadata();
+                    isAnimated = metadata.pages > 1;
+                } catch (err) {
+                    console.error('[metadata]', err.message);
+                    return reply('Invalid media format');
+                }
+            } else {
+                isAnimated = true; // Videos are treated as animated
             }
-
-            const isAnimated = metadata.pages > 1;
             const tempDir = path.join(process.cwd(), 'temp');
 
             if (!fs.existsSync(tempDir)) {

@@ -4,7 +4,7 @@
  * Example: .wallpaper cars
  * Example: .wallpaper blonde girl, anime, city, dark vibe
  *
- * Provider: https://apis.prexzyvilla.site/search/wallpaper?query=&page=
+ * Provider: https://prexzyapis.com/search/wallpaper?query=&page=
  * (exact endpoint as given). The real response shape couldn't be
  * confirmed live (test request 400'd with no visible body from this
  * environment), so results are parsed defensively via
@@ -27,7 +27,7 @@ async function searchWallpapers(query, page) {
         const params = { query };
         if (page) params.page = page;
 
-        const { data } = await axios.get('https://apis.prexzyvilla.site/search/wallpaper', {
+        const { data } = await axios.get('https://prexzyapis.com/search/wallpaper', {
             params,
             timeout: 30000,
             validateStatus: () => true,

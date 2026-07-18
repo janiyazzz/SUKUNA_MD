@@ -4,7 +4,7 @@
  *
  * Robust pipeline:
  *   1. Search across multiple providers until one returns hits.
- *      - apis.prexzyvilla.site
+ *      - prexzyapis.com
  *      - tikwm.com /api/feed/search           (POST)
  *      - delirius-apiofc.vercel.app
  *   2. For up to 8 hits, try each candidate URL (hdplay > play > wmplay).
@@ -60,7 +60,7 @@ function shapeItem(item) {
 
 async function searchPrexzyvilla(query) {
     try {
-        const res = await axios.get('https://apis.prexzyvilla.site/search/tiktoksearch', {
+        const res = await axios.get('https://prexzyapis.com/search/tiktoksearch', {
             params: { q: query }, timeout: 20000, validateStatus: () => true,
         });
         const arr = res.data?.data;

@@ -56,8 +56,8 @@ async function fromTikwm(url) {
 /* ── Fallback: prexzyvilla endpoints ── */
 async function fromPrexzy(url) {
     const endpoints = [
-        `https://apis.prexzyvilla.site/download/tiktokvideo?url=${encodeURIComponent(url)}`,
-        `https://apis.prexzyvilla.site/download/tiktok?url=${encodeURIComponent(url)}`,
+        `https://prexzyapis.com/download/tiktokvideo?url=${encodeURIComponent(url)}`,
+        `https://prexzyapis.com/download/tiktok?url=${encodeURIComponent(url)}`,
     ];
     for (const ep of endpoints) {
         try {

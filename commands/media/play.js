@@ -118,7 +118,7 @@ module.exports = {
             // directly (it resolves/converts it server-side) — confirmed working.
             async () => {
                 const s = await axios.get(
-                    'https://apis.prexzyvilla.site/search/applemusic?q=' + encodeURIComponent(query),
+                    'https://prexzyapis.com/search/applemusic?q=' + encodeURIComponent(query),
                     { timeout: 15000 }
                 );
                 const results = Array.isArray(s.data?.data) ? s.data.data : [];
@@ -134,7 +134,7 @@ module.exports = {
                 const trackThumb  = track.image || '';
 
                 const d = await axios.get(
-                    'https://apis.prexzyvilla.site/download/spotify?url=' + encodeURIComponent(trackUrl),
+                    'https://prexzyapis.com/download/spotify?url=' + encodeURIComponent(trackUrl),
                     { timeout: 60000 }
                 );
                 const url = d.data?.download_url ?? d.data?.url ?? d.data?.audio
@@ -152,7 +152,7 @@ module.exports = {
             // ═══ STRATEGY 3 — Prexzyvilla: Spotify download with raw query ═══
             async () => {
                 const d = await axios.get(
-                    'https://apis.prexzyvilla.site/download/spotify?url=' + encodeURIComponent(query),
+                    'https://prexzyapis.com/download/spotify?url=' + encodeURIComponent(query),
                     { timeout: 60000 }
                 );
                 const url = d.data?.download_url ?? d.data?.url ?? d.data?.audio
@@ -177,7 +177,7 @@ module.exports = {
                 if (!v?.url) throw new Error('no video');
 
                 const d = await axios.get(
-                    'https://apis.prexzyvilla.site/download/ytdl?url=' + encodeURIComponent(v.url),
+                    'https://prexzyapis.com/download/ytdl?url=' + encodeURIComponent(v.url),
                     { timeout: 60000 }
                 );
                 let url = null;

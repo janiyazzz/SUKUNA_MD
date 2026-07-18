@@ -2,7 +2,7 @@ const { makeNsfwCommand } = require('../../lib/nsfwFetch');
 module.exports = makeNsfwCommand({
     name: 'ass',
     aliases: [],
-    endpoint: 'https://apis.prexzyvilla.site/nsfw/ass',
+    endpoint: 'https://prexzyapis.com/nsfw/ass',
     emoji: '🍑',
     label: 'Ass',
 });

@@ -1,7 +1,7 @@
 /**
  * .tts <text> — text-to-speech
  *
- * Fix: the previous version assumed apis.prexzyvilla.site/tts/tts-en always
+ * Fix: the previous version assumed prexzyapis.com/tts/tts-en always
  * returns JSON with a nested audio URL. Elsewhere in this codebase
  * (utils/ttsHelper.js, commands/general/speak.js) the SAME family of TTS
  * endpoints is treated as returning raw audio bytes directly — and that
@@ -9,7 +9,7 @@
  * of '.tts' silently failing.
  *
  * New behaviour:
- *  1. Try apis.prexzyvilla.site/tts/tts-en directly, sniffing the response —
+ *  1. Try prexzyapis.com/tts/tts-en directly, sniffing the response —
  *     if it's audio bytes, use them; if it's JSON, walk it for a URL (covers
  *     either possible response shape without guessing wrong).
  *  2. Fall back to utils/ttsHelper.js's generateVoice() — already used
@@ -38,7 +38,7 @@ function walkAudioUrls(node, out) {
 // ─── Step 1: try prexzyvilla directly, accepting EITHER response shape ──────
 async function tryPrexzyvillaDirect(text) {
     try {
-        const url = `https://apis.prexzyvilla.site/tts/tts-en?text=${encodeURIComponent(text)}`;
+        const url = `https://prexzyapis.com/tts/tts-en?text=${encodeURIComponent(text)}`;
         const res = await axios.get(url, {
             responseType: 'arraybuffer',
             timeout: 30000,

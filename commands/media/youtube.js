@@ -34,7 +34,7 @@ function pickVideoUrl(d) {
 }
 
 async function downloadYt(url) {
-    const ep = `https://apis.prexzyvilla.site/download/youtube-video?url=${encodeURIComponent(url)}`;
+    const ep = `https://prexzyapis.com/download/youtube-video?url=${encodeURIComponent(url)}`;
     const r = await axios.get(ep, { timeout: 60000 });
     const root = r.data?.data || r.data?.result || r.data || {};
     return {

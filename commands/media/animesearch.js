@@ -42,7 +42,7 @@ module.exports = {
         const query = args.join(' ').trim();
         try {
             await sock.sendMessage(from, { react: { text: '🔍', key: msg.key } });
-            const ep = `https://apis.prexzyvilla.site/anime/animekill-search?query=${encodeURIComponent(query)}`;
+            const ep = `https://prexzyapis.com/anime/animekill-search?query=${encodeURIComponent(query)}`;
             const r = await axios.get(ep, { timeout: 25000, validateStatus: () => true });
             if (r.status >= 400) throw new Error(`API ${r.status}`);
             const list = extractList(r.data);

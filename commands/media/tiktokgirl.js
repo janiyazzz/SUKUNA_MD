@@ -73,7 +73,7 @@ const PROVIDERS = [
     {
         name: 'prexzyvilla',
         async fetch() {
-            const r = await axios.get('https://apis.prexzyvilla.site/random/tiktokgirl', {
+            const r = await axios.get('https://prexzyapis.com/random/tiktokgirl', {
                 timeout: 20000, headers: { 'User-Agent': UA }, validateStatus: () => true,
             });
             if (r.status >= 400) throw new Error('prexzyvilla ' + r.status);

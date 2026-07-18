@@ -15,7 +15,7 @@ const TMDB_BEARER =
 const TMDB_BASE  = 'https://api.themoviedb.org/3';
 const IMG_BASE   = 'https://image.tmdb.org/t/p/w500';
 const TMDB_HDR   = { accept: 'application/json', Authorization: `Bearer ${TMDB_BEARER}` };
-const PREXZY_DL  = 'https://apis.prexzyvilla.site/download/youtube-video';
+const PREXZY_DL  = 'https://prexzyapis.com/download/youtube-video';
 
 const QUALITY_MAP = {
     '360p': ['480p', '360p', '720p', '1080p'],

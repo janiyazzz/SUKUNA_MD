@@ -3,7 +3,7 @@
  * Usage: .ss https://example.com
  */
 
-const API = 'https://apis.prexzyvilla.site/ssweb/webss?url=';
+const API = 'https://prexzyapis.com/ssweb/webss?url=';
 
 function normalizeUrl(input) {
     if (!input) return null;

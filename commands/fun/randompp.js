@@ -6,7 +6,7 @@
 'use strict';
 const { fetchManyMedia } = require('../../lib/mediaFetch');
 
-const ENDPOINT = 'https://apis.prexzyvilla.site/random/profilepics';
+const ENDPOINT = 'https://prexzyapis.com/random/profilepics';
 const COUNT = 5;
 
 module.exports = {

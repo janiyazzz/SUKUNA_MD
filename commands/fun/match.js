@@ -4,7 +4,7 @@
  *        .match arsenal    -> filter by team / league / country
  */
 
-const API = 'https://apis.prexzyvilla.site/sports/football?detail=&category=&id=&lang=';
+const API = 'https://prexzyapis.com/sports/football?detail=&category=&id=&lang=';
 
 function fmtTime(ts) {
     if (!ts) return 'TBD';

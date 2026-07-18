@@ -114,7 +114,7 @@ async function downloadAudio(ytUrl) {
         // Strategy 1: Prexzyvilla Spotify download
         async () => {
             const d = await axios.get(
-                'https://apis.prexzyvilla.site/download/spotify?url=' + encodeURIComponent(ytUrl),
+                'https://prexzyapis.com/download/spotify?url=' + encodeURIComponent(ytUrl),
                 { timeout: 60000 }
             );
             const url = d.data?.download_url ?? d.data?.url ?? d.data?.audio
@@ -126,7 +126,7 @@ async function downloadAudio(ytUrl) {
         // Strategy 2: Prexzyvilla YTDL
         async () => {
             const d = await axios.get(
-                'https://apis.prexzyvilla.site/download/ytdl?url=' + encodeURIComponent(ytUrl),
+                'https://prexzyapis.com/download/ytdl?url=' + encodeURIComponent(ytUrl),
                 { timeout: 60000 }
             );
             let url = null;

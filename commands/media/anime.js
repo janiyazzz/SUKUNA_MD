@@ -5,7 +5,7 @@
  * specifically for "give me a picture of X in anime style".)
  *
  * Providers (first success wins):
- *  1. apis.prexzyvilla.site/ai/anime — as given. Response shape was never
+ *  1. prexzyapis.com/ai/anime — as given. Response shape was never
  *     confirmed live (every test request 400'd with no visible body), so
  *     this is parsed defensively via utils/prexzyShape.js rather than
  *     assuming one exact field name.
@@ -21,7 +21,7 @@ async function tryPrexzyvillaAnime(prompt, negativePrompt) {
         const params = { prompt };
         if (negativePrompt) params.negative_prompt = negativePrompt;
 
-        const { data } = await axios.get('https://apis.prexzyvilla.site/ai/anime', {
+        const { data } = await axios.get('https://prexzyapis.com/ai/anime', {
             params,
             timeout: 60000,
             validateStatus: () => true,

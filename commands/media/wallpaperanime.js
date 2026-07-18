@@ -2,7 +2,7 @@
  * .wallpaperanime — sends 5 random anime wallpapers
  *
  * Providers (first success wins, per-image fallback if needed):
- *  1. apis.prexzyvilla.site/random/anime/wallmlnime — as given. Response
+ *  1. prexzyapis.com/random/anime/wallmlnime — as given. Response
  *     shape was never confirmed live (test request 500'd with no visible
  *     body), so parsed defensively. Called 5x in case it returns one
  *     image per call, with a check in case it returns several at once.
@@ -23,7 +23,7 @@ const FALLBACK_PROMPTS = [
 
 async function tryPrexzyvillaWallpaper() {
     try {
-        const { data } = await axios.get('https://apis.prexzyvilla.site/random/anime/wallmlnime', {
+        const { data } = await axios.get('https://prexzyapis.com/random/anime/wallmlnime', {
             timeout: 30000,
             validateStatus: () => true,
         });

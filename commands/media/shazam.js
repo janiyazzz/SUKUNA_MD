@@ -237,10 +237,9 @@ function cleanupFiles(files) {
 module.exports = {
     name: 'shazam',
     alias: ['whatmusic', 'identify', 'findaudio'],
-    desc: 'Identify music from replied audio/video message',
+    desc: 'Identify music and auto-download audio',
     category: 'Media',
     usage: '.shazam',
-    handleShazamReply,
 
     execute: async (context) => {
         const { sock, msg, from, reply } = context;
@@ -327,7 +326,7 @@ module.exports = {
             const thumbnail = ytInfo?.thumbnail || 'https://files.catbox.moe/5uli5p.jpeg';
 
             // Build info text
-            let infoText = `╭─❍ 𝙎𝙇𝙂 𝙄𝘿𝙀𝙉𝙏𝙄𝙁𝙄𝘌𝘋\n`;
+            let infoText = `╭─❍ 𝙎𝙊𝙉𝙂 𝙄𝘿𝙀𝙉𝙏𝙄𝙁𝙄𝘌𝘿\n`;
             infoText += `│\n`;
             infoText += `│ 🎵 Title: ${title}\n`;
             infoText += `│ 🎤 Artist: ${artist}\n`;
@@ -338,36 +337,44 @@ module.exports = {
             if (ytUrl) {
                 infoText += `│ 🔗 Watch/Listen:\n`;
                 infoText += `│ ${ytUrl}\n`;
-                infoText += `│\n`;
-                infoText += `│ Reply with:\n`;
-                infoText += `│ 1️⃣  for audio\n`;
-                infoText += `│ 2️⃣  for video\n`;
             }
             infoText += `╰────────────────────`;
 
-            // Send result
-            const sentMsg = await sock.sendMessage(from, {
+            // Send result with thumbnail
+            await sock.sendMessage(from, {
                 image: { url: thumbnail },
                 caption: infoText
             }, { quoted: msg });
 
-            // Store session for download
-            if (ytUrl) {
-                const sessionKey = from + ':' + msg.sender;
-                activeShazamSessions.set(sessionKey, {
-                    messageId: sentMsg.key.id,
-                    ytUrl,
-                    title,
-                    timestamp: Date.now()
-                });
+            // React with downloading emoji
+            await sock.sendMessage(from, {
+                react: { text: '⬇️', key: msg.key }
+            }).catch(() => {});
 
-                // Cleanup session after 5 minutes
-                setTimeout(() => activeShazamSessions.delete(sessionKey), 5 * 60 * 1000);
+            // Automatically download and send audio
+            if (ytUrl) {
+                try {
+                    const audioUrl = await downloadAudio(ytUrl);
+                    
+                    if (audioUrl) {
+                        await sock.sendMessage(from, {
+                            audio: { url: audioUrl },
+                            mimetype: 'audio/mpeg',
+                            fileName: title + '.mp3',
+                            ptt: false
+                        }, { quoted: msg });
+                    } else {
+                        await reply('Could not download audio from the source');
+                    }
+                } catch (downloadErr) {
+                    console.error('[audio download]', downloadErr.message);
+                    await reply('Failed to download audio automatically');
+                }
             }
 
             // React with success
             await sock.sendMessage(from, {
-                react: { text: '🎶', key: msg.key }
+                react: { text: '✨', key: msg.key }
             }).catch(() => {});
 
         } catch (err) {

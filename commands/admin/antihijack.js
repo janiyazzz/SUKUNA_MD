@@ -29,57 +29,34 @@ module.exports = {
     category: 'admin',
 
     async execute(context) {
-        const { sock, msg: m, reply, args } = context;
-        const groupId = m.chat;
-        if (!groupId.endsWith('@g.us')) return reply('⛧ ' + boldItalic('Group only') + ' ⛧');
+        try {
+            const { sock, msg: m, reply, args } = context;
+            const groupId = m.chat;
+            if (!groupId.endsWith('@g.us')) return reply('Group only');
 
-        const action = (args[0] || '').toLowerCase();
-        const settings = getGroupConfig(groupId);
-        const on = settings.antipromote || settings.antidemote;
+            const action = (args[0] || '').toLowerCase();
+            const settings = getGroupConfig(groupId);
+            const on = settings.antipromote || settings.antidemote;
 
-        const card = (title, body) =>
-            `╭─❒ ◈ ${boldItalic('SUKUNA · AntiHijack')} ❒\n` +
-            `│ ⛧ ${title}\n` +
-            `├──────────────⛧\n` +
-            body.split('\n').map(l => `│ ${l}`).join('\n') + `\n` +
-            `╰────────────⛧`;
+            if (!['on','off','status'].includes(action)) {
+                return reply(`AntiHijack: ${on ? 'ON ✅' : 'OFF ❌'}\n\nUsage:\n.antihijack on\n.antihijack off\n.antihijack status`);
+            }
 
-        if (!['on','off','status'].includes(action)) {
-            return reply(card(
-                boldItalic('Usage'),
-                `Status   : ${on ? 'ON ✅' : 'OFF ❌'}\n` +
-                `Toggle   : .antihijack on | off\n` +
-                `Inspect  : .antihijack status\n\n` +
-                `Reverses any unauthorized\n` +
-                `promote / demote in <1s and\n` +
-                `demotes the offender.\n` +
-                `Bot must be admin.`
-            ));
+            if (action === 'status') {
+                return reply(on ? `✅ AntiHijack is ON` : `❌ AntiHijack is OFF`);
+            }
+
+            if (action === 'on') {
+                updateGroupConfig(groupId, { antipromote: true, antidemote: true });
+                setupPromotionGuard(sock);
+                return reply('✅ AntiHijack enabled');
+            }
+
+            updateGroupConfig(groupId, { antipromote: false, antidemote: false });
+            return reply('❌ AntiHijack disabled');
+        } catch (err) {
+            console.error('[antihijack]', err.message);
+            return context.reply(`Error: ${err.message}`);
         }
-
-        if (action === 'status') {
-            return reply(card(
-                boldItalic('Status'),
-                on
-                    ? `Active ✅\nHierarchy is locked.\nUnauthorized promotes/demotes\nget reversed instantly.`
-                    : `Inactive ❌\nEnable with .antihijack on`
-            ));
-        }
-
-        if (action === 'on') {
-            updateGroupConfig(groupId, { antipromote: true, antidemote: true });
-            setupPromotionGuard(sock);
-            return reply(card(
-                boldItalic('Activated'),
-                `Protection : ON ✅\nReaction   : <1s\nRetries    : 3 × 400ms\nLoop guard : enabled\n\nBot must be admin.`
-            ));
-        }
-
-        // off
-        updateGroupConfig(groupId, { antipromote: false, antidemote: false });
-        return reply(card(
-            boldItalic('Deactivated'),
-            `Protection : OFF ❌\nHierarchy is no longer\nguarded by Sukuna.`
-        ));
     }
 };

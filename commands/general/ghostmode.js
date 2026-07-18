@@ -37,66 +37,40 @@ module.exports = {
     ownerOnly: true,
 
     execute: async (context) => {
-        const { sock, msg: m, args, reply } = context;
-        const sub = args[0]?.toLowerCase();
+        try {
+            const { sock, args, reply } = context;
+            const sub = args[0]?.toLowerCase();
 
-        if (!sub || sub === 'status') {
-            const status = ghostEnabled ? '🟢 ON (offline to others)' : '🔴 OFF (normal presence)';
-            return reply(
-                `👻 *Ghost Mode Status*\n\n` +
-                `Current: ${status}\n\n` +
-                `Toggle:\n` +
-                `• .ghost on   → appear offline while active\n` +
-                `• .ghost off  → back to normal`
-            );
-        }
+            if (!sub || sub === 'status') {
+                const status = ghostEnabled ? 'ON' : 'OFF';
+                return reply(`Ghost Mode: ${status}`);
+            }
 
-        if (sub === 'on') {
-            if (ghostEnabled) return reply('👻 Ghost mode already active');
-
-            ghostEnabled = true;
-            saveGhost();
-
-            // Force offline presence immediately
-            await sock.sendPresenceUpdate('unavailable');
-
-            // Keep forcing unavailable every 30 seconds (WhatsApp resets presence)
-            const interval = setInterval(async () => {
-                if (!ghostEnabled) {
-                    clearInterval(interval);
-                    return;
-                }
+            if (sub === 'on') {
+                if (ghostEnabled) return reply('Already ON');
+                ghostEnabled = true;
+                saveGhost();
                 try {
                     await sock.sendPresenceUpdate('unavailable');
                 } catch {}
-            }, 30000);
+                return reply('✓ Ghost mode ON');
+            }
 
-            return reply(
-                `👻 *Ghost Mode ACTIVATED*\n\n` +
-                `• You now appear offline to everyone\n` +
-                `• Bot still reads/replies normally\n` +
-                `• Turn off with: .ghost off\n\n` +
-                `Stay hidden 😈`
-            );
+            if (sub === 'off') {
+                if (!ghostEnabled) return reply('Already OFF');
+                ghostEnabled = false;
+                saveGhost();
+                try {
+                    await sock.sendPresenceUpdate('available');
+                } catch {}
+                return reply('✓ Ghost mode OFF');
+            }
+
+            reply('Use: .ghost on | off | status');
+        } catch (err) {
+            console.error('[ghostmode]', err.message);
+            return context.reply('Error: ' + err.message);
         }
-
-        if (sub === 'off') {
-            if (!ghostEnabled) return reply('👻 Ghost mode already off');
-
-            ghostEnabled = false;
-            saveGhost();
-
-            // Restore normal presence
-            await sock.sendPresenceUpdate('available');
-
-            return reply(
-                `🔴 *Ghost Mode DEACTIVATED*\n\n` +
-                `• Normal online status restored\n` +
-                `• Everyone can see when you're active again`
-            );
-        }
-
-        reply('⚉ Invalid. Use .ghost on | off | status');
     }
 };
 

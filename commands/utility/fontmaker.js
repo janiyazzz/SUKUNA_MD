@@ -128,42 +128,46 @@ module.exports = {
     usage: '.fontmaker <font_number> <text>',
 
     execute: async (context) => {
-        const { sock, msg: m, args, reply } = context;
-        if (args.length < 2) {
-            // Show available fonts
-            let fontList = `*━━ FONTMAKER - 100 FONTS ━━*\n\n`;
-            let count = 1;
-            for (const [num, font] of Object.entries(FONTS)) {
-                if (count % 5 === 0) {
-                    fontList += `${num}. ${font.name}\n`;
-                } else {
-                    fontList += `${num}. ${font.name} | `;
+        try {
+            const { args, reply } = context;
+            if (args.length < 2) {
+                let list = 'Available fonts:\n\n';
+                for (let i = 1; i <= Object.keys(FONTS).length; i++) {
+                    const font = FONTS[i];
+                    if (font) {
+                        list += `${i}. ${font.name}\n`;
+                        if (i % 10 === 0) list += '\n';
+                    }
                 }
-                count++;
+                list += '\n.fontmaker <number> <text>';
+                return reply(list);
             }
-            fontList += `\n*Usage:* .fontmaker <number> <text>\n`;
-            fontList += `*Example:* .fontmaker 1 hello world`;
-            return reply(fontList);
+
+            const fontNumber = parseInt(args[0]);
+            const text = args.slice(1).join(' ');
+
+            if (isNaN(fontNumber) || fontNumber < 1 || fontNumber > 100) {
+                return reply('Font must be 1-100');
+            }
+
+            if (!text || text.trim().length === 0) {
+                return reply('Provide text to convert');
+            }
+
+            const font = FONTS[fontNumber];
+            if (!font) {
+                return reply(`Font ${fontNumber} not found`);
+            }
+
+            const result = convertText(text, fontNumber);
+            if (!result) {
+                return reply(`Cannot convert with font ${fontNumber}`);
+            }
+
+            return reply(`*${font.name}*\n${result}`);
+        } catch (err) {
+            console.error('[fontmaker]', err.message);
+            return context.reply('Error: ' + err.message);
         }
-
-        const fontNumber = parseInt(args[0]);
-        const text = args.slice(1).join(' ');
-
-        if (isNaN(fontNumber) || fontNumber < 1 || fontNumber > 100) {
-            return reply(`❌ Font number must be between 1 and 100\n\nUse .fontmaker to see all fonts`);
-        }
-
-        if (!text || text.trim().length === 0) {
-            return reply('❌ Please provide text to convert');
-        }
-
-        const font = FONTS[fontNumber];
-        const result = convertText(text, fontNumber);
-
-        if (!result) {
-            return reply(`❌ Font ${fontNumber} not found`);
-        }
-
-        return reply(`*${font.name}*\n\n${result}`);
     }
 };

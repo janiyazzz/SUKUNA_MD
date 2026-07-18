@@ -11,9 +11,11 @@ module.exports = {
     },
 
     execute: async (context) => {
-        const { sock, msg: m } = context;
+        const { sock, msg: m, reply } = context;
         try {
-            if (!m.key.fromMe) return;
+            if (!m.key?.fromMe) {
+                return reply('Owner only');
+            }
 
             await sock.chatModify({
                 delete: true,
@@ -26,11 +28,12 @@ module.exports = {
             await new Promise(resolve => setTimeout(resolve, 2000));
 
             await sock.sendMessage(m.chat, {
-                text: '✦ _*clean*_'
+                text: '✓ cleaned'
             });
 
         } catch (err) {
-            console.error("Wipe Logic Error:", err);
+            console.error('[clear]', err.message);
+            reply('Error: ' + err.message);
         }
     }
 };

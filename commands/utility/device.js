@@ -30,44 +30,37 @@ module.exports = {
     async execute(context) {
         const { sock, msg: m, reply } = context;
         try {
-            const quotedId = m.quoted?.key?.id 
-                || m.quoted?.id
-                || m.msg?.contextInfo?.stanzaId
-                || m.message?.extendedTextMessage?.contextInfo?.stanzaId;
+            if (!m.quoted) return reply('Reply to a message with .device');
 
-            const targetId = quotedId || m.key?.id;
-            const targetSender = quotedId
-                ? (m.quoted?.sender || m.msg?.contextInfo?.participant || 'that user')
-                : (m.sender || 'you');
+            const quotedId = m.quoted?.key?.id || m.quoted?.id;
+            if (!quotedId) return reply('Cannot read message ID');
 
-            if (!targetId) return reply('Reply to a message with .device to detect the device');
+            const targetId = quotedId;
+            const targetSender = m.quoted?.sender || 'Unknown';
 
             const device = detectDevice(targetId);
             const label = DEVICE_LABELS[device] || DEVICE_LABELS.unknown;
-            const who = quotedId ? `@${String(targetSender).split('@')[0]}` : 'You';
+            const num = String(targetSender).split('@')[0];
 
             let pp = null;
             try {
                 pp = await sock.profilePictureUrl(targetSender, 'image');
             } catch (_) {}
 
-            const message = {
-                text: `${who}: *${label}*`,
-                mentions: quotedId && String(targetSender).includes('@') ? [targetSender] : [],
-            };
+            const text = `@${num}: *${label}*`;
 
             if (pp) {
                 return sock.sendMessage(m.chat, {
                     image: { url: pp },
-                    caption: message.text,
-                    mentions: message.mentions,
+                    caption: text,
+                    mentions: [targetSender],
                 }, { quoted: m });
             }
 
-            return sock.sendMessage(m.chat, message, { quoted: m });
+            return sock.sendMessage(m.chat, { text }, { quoted: m });
         } catch (err) {
-            console.error('[device] error:', err.message);
-            reply('Failed to detect device.');
+            console.error('[device]', err.message);
+            reply('Error: ' + err.message);
         }
     },
 

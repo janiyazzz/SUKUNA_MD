@@ -43,7 +43,7 @@ module.exports = {
                 await sleep(REACT_DELAY_MS);
             }
 
-            const coolText = fontmakerLib.convert('All systems up and running boss', 11);
+            const coolText = fontmakerLib.convert('`All systems up and running boss`', 11);
 
             await sock.sendMessage(from, { text: coolText }, { quoted: msg });
         } catch (err) {

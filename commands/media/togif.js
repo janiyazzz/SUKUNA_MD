@@ -13,28 +13,11 @@ module.exports = {
         try {
             const { sock, msg, from, reply } = context;
 
-            if (!msg || !msg.message) {
-                return reply('Invalid message context');
-            }
+            const quoted = msg.quoted || msg;
+            const mime = quoted.mimetype || '';
 
-            // Check if replying to a sticker or media
-            const contextInfo = msg.message?.extendedTextMessage?.contextInfo || msg.message?.contextInfo || {};
-            const quotedMessage = contextInfo?.quotedMessage;
-
-            if (!quotedMessage) {
-                return reply('Reply to a sticker');
-            }
-
-            // Get media type
-            const mediaContent = quotedMessage?.imageMessage || quotedMessage?.videoMessage || quotedMessage?.stickerMessage;
-            if (!mediaContent) {
+            if (!mime || (!mime.includes('webp') && !mime.includes('image'))) {
                 return reply('Reply to a sticker or image');
-            }
-
-            // Check if it's a sticker (webp)
-            const mimeType = mediaContent.mimetype || '';
-            if (!mimeType.includes('webp') && !mimeType.includes('image')) {
-                return reply('Only stickers and images supported');
             }
 
             await reply('⏳ Converting sticker...');
@@ -42,18 +25,13 @@ module.exports = {
             // Download media
             let mediaBuffer = null;
             try {
-                const mediaKey = mediaContent.mediaKey;
-                const mediaUrl = mediaContent.directPath;
-
-                if (mediaUrl) {
-                    const downloadedMsg = await sock.downloadMediaMessage(quotedMessage);
-                    mediaBuffer = downloadedMsg;
-                } else {
+                mediaBuffer = await quoted.download?.();
+                if (!mediaBuffer) {
                     return reply('Cannot download media');
                 }
             } catch (err) {
                 console.error('[media download]', err.message);
-                return reply('Failed to download sticker');
+                return reply('Failed to download media');
             }
 
             // Get metadata
@@ -153,7 +131,7 @@ module.exports = {
 
         } catch (err) {
             console.error('[togif]', err.message);
-            context?.reply?.('Conversion failed');
+            context.reply('Conversion failed');
         }
     }
 };

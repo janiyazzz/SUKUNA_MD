@@ -15,9 +15,8 @@ module.exports = {
         const { sock, msg, from, reply } = context;
 
         try {
-            const quoted = msg?.message?.contextInfo?.quotedMessage || msg;
-            const mime = quoted.mediaType || msg.message?.imageMessage?.mimetype || 
-                        msg.message?.videoMessage?.mimetype || '';
+            const quoted = msg.quoted || msg;
+            const mime = quoted.mimetype || '';
 
             // Validate media type
             if (!/image|video|webp/.test(mime)) {
@@ -29,25 +28,14 @@ module.exports = {
             // Download media
             let media = null;
             try {
-                if (quoted.mediaType === 'image' || /image/.test(mime)) {
-                    media = quoted.imageData || msg.message?.imageMessage?.imageData;
-                } else if (quoted.mediaType === 'video' || /video/.test(mime)) {
-                    media = quoted.videoData || msg.message?.videoMessage?.videoData;
-                } else {
-                    media = quoted.stickerData || msg.message?.stickerMessage?.fileSha256;
-                }
-
+                media = await quoted.download?.();
+                
                 if (!media) {
-                    // Fallback: try to get media through socket's media download
-                    media = await sock.downloadMediaMessage(msg);
+                    return reply('Could not download media');
                 }
             } catch (err) {
                 console.error('[media download]', err.message);
                 return reply('Failed to download media');
-            }
-
-            if (!media) {
-                return reply('Could not extract media');
             }
 
             // Create temp directory

@@ -18,7 +18,9 @@ module.exports = {
     alias: ['s', 'stick'],
     category: 'Media',
 
-    execute: async (sock, msg, { reply }) => {
+    execute: async (context) => {
+        const { sock, msg, from, reply } = context;
+        
         const quoted = msg.quoted || msg;
         const mime = quoted.mimetype || '';
 
@@ -96,7 +98,7 @@ module.exports = {
             buffer = await addExif(buffer, 'SUKUNA MD', 'crysnovax', ['🔥']);
 
             // Send the sticker
-            await sock.sendMessage(msg.chat || msg.from, { sticker: buffer }, { quoted: msg });
+            await sock.sendMessage(from, { sticker: buffer }, { quoted: msg });
 
             // Cleanup temporary files
             fs.unlinkSync(input);

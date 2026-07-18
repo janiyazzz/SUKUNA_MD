@@ -28,7 +28,8 @@ module.exports = {
     description: 'Protect admin hierarchy — auto-reverse unauthorized promote/demote',
     category: 'admin',
 
-    async execute(sock, m, { reply, args }) {
+    async execute(context) {
+        const { sock, msg: m, reply, args } = context;
         const groupId = m.chat;
         if (!groupId.endsWith('@g.us')) return reply('⛧ ' + boldItalic('Group only') + ' ⛧');
 

@@ -27,7 +27,8 @@ module.exports = {
     category: 'utility',
     usage: '.device (reply to a message)',
 
-    async execute(sock, m, { reply }) {
+    async execute(context) {
+        const { sock, msg: m, reply } = context;
         try {
             const quotedId = m.quoted?.key?.id 
                 || m.quoted?.id

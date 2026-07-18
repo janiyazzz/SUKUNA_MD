@@ -92,7 +92,7 @@ const FONTS = {
     88: { name: 'Bengali', map: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', convert: 'অ আ ই ঈ উ ঊ ঋ এ ঐ ও ঔ ক খ গ ঘ ঙ চ ছ জ ঝ ঞ ট ঠ ড ঢ' },
     89: { name: 'Kannada', map: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', convert: 'ಅ ಆ ಇ ಈ ಉ ಊ ಋ ಎ ಏ ಐ ಒ ಓ ಔ ಕ ಖ ಗ ಘ ಙ ಚ ಛ ಜ ಝ ಞ ಟ' },
     90: { name: 'Malayalam', map: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', convert: 'അ ആ ഇ ഈ ഉ ഊ ഋ എ ഏ ഐ ഒ ഓ ഔ ക ഖ ഗ ഘ ങ ച ഛ ജ ഝ ഞ ട' },
-    91: { name: 'Sinhala', map: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', convert: 'අ ආ ඇ ඈ ඉ ඊ උ එ ඒ ඓ ඔ ඕ ඖ ක ඛ ག ඝ ང ච ඡ ජ ඣ ඤ ඥ ඦ' },
+    91: { name: 'Sinhala', map: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', convert: 'අ ආ ඇ ඈ ඉ ඊ උ එ ඒ ඓ ඔ ඕ ඖ ක ඛ ག ඝ ང �� ඡ ජ ඣ ඤ ඥ ඦ' },
     92: { name: 'Khmer', map: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', convert: 'ក ខ គ ឃ ង ច ឆ ជ ឈ ញ ដ ឋ ណ ត ថ ទ ធ ន ប ផ ព ភ ម យ រ' },
     93: { name: 'Lao', map: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', convert: 'ກ ຂ ຄ ງ ຈ ສ ຊ ຍ ດ ຕ ຖ ທ ນ ບ ປ ຜ ພ ມ ຢ ຣ ລ ວ ສ ຫ ອ ຮ' },
     94: { name: 'Myanmar', map: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', convert: 'က ခ ག ঘ ङ စ ဆ ဇ ఞ ट ठ ড ඩ ण ත ේ ේ ෙ ෙ ්' },
@@ -127,7 +127,8 @@ module.exports = {
     category: 'utility',
     usage: '.fontmaker <font_number> <text>',
 
-    execute: async (sock, m, { args, reply }) => {
+    execute: async (context) => {
+        const { sock, msg: m, args, reply } = context;
         if (args.length < 2) {
             // Show available fonts
             let fontList = `*━━ FONTMAKER - 100 FONTS ━━*\n\n`;

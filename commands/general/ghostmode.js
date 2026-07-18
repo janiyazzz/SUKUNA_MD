@@ -36,7 +36,8 @@ module.exports = {
     usage: '.ghost on | .ghost off | .ghost status',
     ownerOnly: true,
 
-    execute: async (sock, m, { args, reply }) => {
+    execute: async (context) => {
+        const { sock, msg: m, args, reply } = context;
         const sub = args[0]?.toLowerCase();
 
         if (!sub || sub === 'status') {

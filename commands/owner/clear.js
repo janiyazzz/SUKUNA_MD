@@ -10,7 +10,8 @@ module.exports = {
         success: '✨'
     },
 
-    execute: async (sock, m) => {
+    execute: async (context) => {
+        const { sock, msg: m } = context;
         try {
             if (!m.key.fromMe) return;
 

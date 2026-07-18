@@ -8,7 +8,8 @@ module.exports = {
     groupOnly: true,
     reactions: { start: '😴', success: '📋' },
 
-    execute: async (sock, m, { reply }) => {
+    execute: async (context) => {
+        const { sock, msg: m, reply } = context;
         try {
             const meta = await sock.groupMetadata(m.chat);
             const participants = meta.participants || [];

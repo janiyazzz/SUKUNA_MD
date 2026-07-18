@@ -300,6 +300,31 @@ module.exports = {
                     thumbnail: d.data?.result?.thumbnail || d.data?.result?.image || '',
                 };
             },
+
+            // ═══ STRATEGY 10 — Akuari: robust YouTube search + download ═══
+            async () => {
+                const s = await axios.get(
+                    'https://api.akuari.my.id/search/youtube?query=' + encodeURIComponent(query),
+                    { timeout: 12000 }
+                );
+                const v = s.data?.result?.[0] || s.data?.data?.[0];
+                if (!v?.url && !v?.videoId) throw new Error('no video');
+
+                const videoUrl = v.url || ('https://www.youtube.com/watch?v=' + v.videoId);
+                const d = await axios.get(
+                    'https://api.akuari.my.id/downloader/ytmp3?url=' + encodeURIComponent(videoUrl),
+                    { timeout: 35000 }
+                );
+                const url = d.data?.result?.download || d.data?.download || d.data?.url;
+                if (!url) throw new Error('no audio url');
+                return {
+                    url,
+                    title: v.title || d.data?.title || query,
+                    artist: v.author?.name || v.channel || d.data?.artist || '',
+                    duration: v.duration || d.data?.duration || '',
+                    thumbnail: v.thumbnail || d.data?.thumbnail || '',
+                };
+            },
         ];
 
         // Run strategies; stop on first valid result

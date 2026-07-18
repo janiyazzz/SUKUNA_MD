@@ -9,14 +9,21 @@ module.exports = {
     reactions: { start: '👀', success: '📝' },
 
     execute: async (context) => {
-        const { sock, from, reply } = context;
+        const { sock, from, reply, msg } = context;
         try {
             if (!from || !sock) {
                 return reply('Invalid context');
             }
 
-            const meta = await sock.groupMetadata(from).catch(() => null);
-            if (!meta?.participants) {
+            let meta = null;
+            try {
+                meta = await sock.groupMetadata(from);
+            } catch (err) {
+                console.error('[metadata]', err.message);
+                return reply('Cannot fetch group info');
+            }
+
+            if (!meta?.participants || meta.participants.length === 0) {
                 return reply('No participants');
             }
 
@@ -24,39 +31,35 @@ module.exports = {
                 await sock.presenceSubscribe(from);
             } catch {}
 
-            await new Promise(r => setTimeout(r, 1500));
+            await new Promise(r => setTimeout(r, 1000));
 
             const online = [];
-            const offline = [];
+            const presences = sock.store?.presences || {};
 
             for (const p of meta.participants) {
-                const jid = p?.id;
-                if (!jid) continue;
-
-                let status = null;
                 try {
-                    status = sock.store?.presences?.[jid]?.lastKnownPresence ||
-                            sock.store?.presences?.[from]?.[jid]?.lastKnownPresence;
+                    const jid = p?.id;
+                    if (!jid) continue;
+
+                    let status = presences[jid]?.lastKnownPresence || presences[from]?.[jid]?.lastKnownPresence;
+                    
+                    if (['available', 'composing', 'recording'].includes(status)) {
+                        online.push(jid);
+                    }
                 } catch {}
-
-                if (['available', 'composing', 'recording'].includes(status)) {
-                    online.push(jid);
-                } else if (status) {
-                    offline.push(jid);
-                }
             }
 
-            let text = `Online: ${online.length}\nAway: ${offline.length}\nTotal: ${meta.participants.length}`;
+            let text = `Online: ${online.length}/${meta.participants.length}`;
             if (online.length > 0) {
-                text += `\n\nOnline:\n${online.slice(0, 15).map(j => '✓ @' + j.split('@')[0]).join('\n')}`;
-                if (online.length > 15) text += `\n...${online.length - 15} more`;
+                text += `\n\n${online.slice(0, 20).map(j => '✓ @' + j.split('@')[0]).join('\n')}`;
+                if (online.length > 20) text += `\n+${online.length - 20} more`;
             }
 
-            return await sock.sendMessage(from, { text, mentions: online }, { quoted: context.msg });
+            return await sock.sendMessage(from, { text, mentions: online }, { quoted: msg });
 
         } catch (err) {
             console.error('[listactive]', err.message);
-            reply('Failed');
+            reply('Error checking online');
         }
     }
 };

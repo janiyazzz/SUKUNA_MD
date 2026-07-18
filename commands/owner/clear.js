@@ -18,11 +18,28 @@ module.exports = {
                 return reply('Invalid context');
             }
 
-            await sock.sendMessage(from, { text: 'Chat cleared' });
+            // Delete all messages in the chat
+            try {
+                await sock.chatModify({
+                    delete: true,
+                    lastMessages: [{ key: { remoteJid: from, fromMe: false } }]
+                }, from);
+            } catch (err) {
+                console.error('[delete messages]', err.message);
+            }
+
+            // Clear the conversation
+            try {
+                await sock.clearMessage(from);
+            } catch (err) {
+                console.error('[clear conversation]', err.message);
+            }
+
+            await reply('Chat cleared');
 
         } catch (err) {
             console.error('[clearchat]', err?.message || err);
-            context?.reply?.('Failed to clear');
+            context?.reply?.('Failed');
         }
     }
 };

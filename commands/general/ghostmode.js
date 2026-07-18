@@ -74,11 +74,39 @@ module.exports = {
     }
 };
 
+// Track message sending to set single tick
+module.exports.setupGhostMode = (sock) => {
+    if (!ghostEnabled) return;
+    
+    // Override message sending to prevent double ticks
+    const originalSendMessage = sock.sendMessage.bind(sock);
+    sock.sendMessage = async (jid, content, options = {}) => {
+        const result = await originalSendMessage(jid, content, options);
+        
+        // Immediately mark as sent but not read
+        try {
+            await sock.chatModify({
+                markRead: false,
+                lastMessages: [{
+                    key: {
+                        remoteJid: jid,
+                        fromMe: true,
+                        id: result.key?.id
+                    }
+                }]
+            }, jid);
+        } catch {}
+        
+        return result;
+    };
+};
+
 // Force ghost presence in messages.upsert
 module.exports.forceGhostPresence = async (sock) => {
     if (ghostEnabled) {
         try {
             await sock.sendPresenceUpdate('unavailable');
+            module.exports.setupGhostMode(sock);
         } catch {}
     }
 };

@@ -1,158 +1,110 @@
 /**
- * Sticker Command — Converts a tagged/replied photo or video into a WhatsApp sticker
+ * Sticker Command — Converts images or videos into WhatsApp stickers
+ * 
+ * Supports:
+ *   - Image → sticker
+ *   - Video → animated sticker with smart compression
  *
- * Usage:
- *   Reply to any photo + .sticker  → image sticker
- *   Reply to any video + .sticker  → animated/video sticker
- *   Reply to a sticker + .sticker  → re-sends as sticker
- *
- * Requires: sharp (npm install sharp) for best image conversion
- * Video stickers require ffmpeg on the server (optional)
+ * Uses node-webpmux for metadata (no native sharp dependency)
  */
 
-const { downloadContentFromMessage } = require('@crysnovax/baileys');
-const { exec } = require('child_process');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
-
-const TIMEOUT_MS = 30000;
-
-async function downloadMedia(mediaMsg, type) {
-    return new Promise(async (resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('Download timed out')), TIMEOUT_MS);
-        try {
-            const stream = await downloadContentFromMessage(mediaMsg, type);
-            const chunks = [];
-            for await (const chunk of stream) chunks.push(chunk);
-            clearTimeout(timer);
-            resolve(Buffer.concat(chunks));
-        } catch (err) {
-            clearTimeout(timer);
-            reject(err);
-        }
-    });
-}
-
-function toWebpWithSharp(buffer) {
-    return new Promise((resolve, reject) => {
-        try {
-            const sharp = require('sharp');
-            sharp(buffer)
-                .resize(512, 512, {
-                    fit: 'contain',
-                    background: { r: 0, g: 0, b: 0, alpha: 0 }
-                })
-                .webp({ quality: 80 })
-                .toBuffer()
-                .then(resolve)
-                .catch(reject);
-        } catch (e) {
-            // sharp not installed — return raw buffer and hope for the best
-            resolve(buffer);
-        }
-    });
-}
-
-function videoToWebp(inputPath, outputPath) {
-    return new Promise((resolve, reject) => {
-        // Convert first 6 seconds of video to animated WebP
-        exec(
-            `ffmpeg -y -i "${inputPath}" -vf "scale=512:512:force_original_aspect_ratio=decrease,fps=15" ` +
-            `-t 6 -vcodec libwebp -lossless 0 -compression_level 6 -q:v 50 ` +
-            `-loop 0 -preset default -an -vsync 0 "${outputPath}"`,
-            { timeout: 30000 },
-            (err) => (err ? reject(err) : resolve())
-        );
-    });
-}
-
-function getQuoted(msg) {
-    const m = msg.message;
-    const ctx =
-        m?.extendedTextMessage?.contextInfo ||
-        m?.imageMessage?.contextInfo ||
-        m?.videoMessage?.contextInfo ||
-        null;
-    return { ctx, quoted: ctx?.quotedMessage || null };
-}
+const { exec } = require('child_process');
+const { addExif } = require('../../library/exif');
 
 module.exports = {
     name: 'sticker',
-    aliases: ['s', 'stiker', 'toSticker'],
-    description: 'Convert a tagged photo or video into a WhatsApp sticker',
-    usage: 'Reply to a photo or video + .sticker',
-    category: 'general',
+    alias: ['s', 'stick'],
+    category: 'Media',
 
-    async execute({ sock, msg, from, args, reply }) {
-        const { quoted } = getQuoted(msg);
-        const packName  = args.join(' ') || 'SUKUNA MD';
+    execute: async (sock, msg, { reply }) => {
+        const quoted = msg.quoted || msg;
+        const mime = quoted.mimetype || '';
 
-        // ── Quoted sticker — forward as-is ───────────────────────────────────
-        if (quoted?.stickerMessage) {
-            try {
-                const buf = await downloadMedia(quoted.stickerMessage, 'sticker');
-                await sock.sendMessage(from, { sticker: buf }, { quoted: msg });
-                return;
-            } catch (err) {
-                return reply(`❌ Failed to forward sticker: ${err.message}`);
-            }
+        if (!/image|video/.test(mime)) {
+            return reply('Reply to an image or video');
         }
 
-        // ── Image sticker ─────────────────────────────────────────────────────
-        if (quoted?.imageMessage) {
-            await reply('⏳ _Creating image sticker..._');
-            try {
-                const rawBuf  = await downloadMedia(quoted.imageMessage, 'image');
-                const webpBuf = await toWebpWithSharp(rawBuf);
-                await sock.sendMessage(from, { sticker: webpBuf }, { quoted: msg });
-                return;
-            } catch (err) {
-                return reply(`❌ Failed to create sticker: ${err.message}`);
+        try {
+            const media = await quoted.download();
+
+            const tempDir = path.join(__dirname, '../../temp');
+            if (!fs.existsSync(tempDir)) {
+                fs.mkdirSync(tempDir, { recursive: true });
             }
-        }
 
-        // ── Video sticker ─────────────────────────────────────────────────────
-        if (quoted?.videoMessage) {
-            await reply('⏳ _Creating animated sticker (this may take a moment)..._');
+            const input = path.join(tempDir, `stk_${Date.now()}`);
+            const output = input + '.webp';
 
-            const tmpIn  = path.join(os.tmpdir(), `stk_in_${Date.now()}.mp4`);
-            const tmpOut = path.join(os.tmpdir(), `stk_out_${Date.now()}.webp`);
+            fs.writeFileSync(input, media);
 
-            try {
-                const rawBuf = await downloadMedia(quoted.videoMessage, 'video');
-                fs.writeFileSync(tmpIn, rawBuf);
+            // ================= VIDEO STICKER =================
+            if (/video/.test(mime)) {
+                const duration = (quoted.msg || quoted).seconds || 0;
+                const durationSec = Math.min(duration || 5, 10);
 
-                // Try ffmpeg conversion first
-                let stickerBuf;
-                try {
-                    await videoToWebp(tmpIn, tmpOut);
-                    stickerBuf = fs.readFileSync(tmpOut);
-                } catch (_) {
-                    // ffmpeg not available — send raw video buffer directly
-                    stickerBuf = rawBuf;
+                // Helper to run ffmpeg with given settings
+                const compressVideo = async (fps, quality, dur) => {
+                    const cmd = `ffmpeg -y -i "${input}" -t ${dur} -vf "fps=${fps},scale=512:512:force_original_aspect_ratio=increase,crop=512:512:(iw-ow)/2:(ih-oh)/2,format=yuva420p" -c:v libwebp -lossless 0 -q:v ${quality} -loop 0 -an -preset default -compression_level 6 "${output}"`;
+                    
+                    await new Promise((resolve, reject) => {
+                        exec(cmd, (err) => {
+                            if (err) reject(err);
+                            else resolve();
+                        });
+                    });
+
+                    const sizeKB = fs.statSync(output).size / 1024;
+                    return sizeKB;
+                };
+
+                let sizeKB = await compressVideo(12, 70, durationSec);
+
+                // If too large, try lower fps and quality
+                if (sizeKB > 500) {
+                    sizeKB = await compressVideo(8, 40, durationSec);
                 }
 
-                await sock.sendMessage(from, { sticker: stickerBuf }, { quoted: msg });
-                return;
-            } catch (err) {
-                return reply(`❌ Failed to create video sticker: ${err.message}`);
-            } finally {
-                for (const f of [tmpIn, tmpOut]) {
-                    try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch (_) {}
+                // If still too large, try even lower
+                if (sizeKB > 500) {
+                    sizeKB = await compressVideo(6, 30, durationSec);
+                }
+
+                // Final check – if still too large, abort
+                if (sizeKB > 500) {
+                    fs.unlinkSync(input);
+                    fs.unlinkSync(output);
+                    return reply('Video too complex to fit WhatsApp sticker limit. Try a shorter/simpler clip.');
                 }
             }
-        }
+            // ================= IMAGE STICKER =================
+            else {
+                const imageCmd = `ffmpeg -y -i "${input}" -vf "scale=512:512:force_original_aspect_ratio=increase,crop=512:512:(iw-ow)/2:(ih-oh)/2,format=yuva420p" -c:v libwebp -lossless 0 -q:v 80 -an "${output}"`;
+                await new Promise((resolve, reject) => {
+                    exec(imageCmd, (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    });
+                });
+            }
 
-        // ── No media found ────────────────────────────────────────────────────
-        return reply(
-            `🎨 *Sticker Maker*\n\n` +
-            `Reply to a *photo* or *video* with \`.sticker\` to convert it!\n\n` +
-            `*Example:*\n` +
-            `• Reply to any image + \`.sticker\`\n` +
-            `• Reply to any video + \`.sticker\` (animated)\n` +
-            `• Reply to existing sticker + \`.sticker\` to forward it\n\n` +
-            `_Video stickers require ffmpeg on the server_`
-        );
+            // Read the generated WebP
+            let buffer = fs.readFileSync(output);
+
+            // Add sticker metadata (pack/author)
+            buffer = await addExif(buffer, 'SUKUNA MD', 'crysnovax', ['🔥']);
+
+            // Send the sticker
+            await sock.sendMessage(msg.chat || msg.from, { sticker: buffer }, { quoted: msg });
+
+            // Cleanup temporary files
+            fs.unlinkSync(input);
+            if (fs.existsSync(output)) fs.unlinkSync(output);
+
+        } catch (e) {
+            console.error('[sticker]', e);
+            reply('Failed to create sticker');
+        }
     }
 };

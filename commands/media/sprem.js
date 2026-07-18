@@ -1,0 +1,157 @@
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const { exec } = require('child_process');
+const { addExif } = require('../../library/exif');
+
+module.exports = {
+    name: 'sprem',
+    aliases: ['stickerprem', 'spremium'],
+    category: 'Media',
+    desc: 'Convert image/video to premium sticker with metadata',
+
+    execute: async (context) => {
+        const { sock, msg, from, reply } = context;
+
+        try {
+            const quoted = msg?.message?.contextInfo?.quotedMessage || msg;
+            const mime = quoted.mediaType || msg.message?.imageMessage?.mimetype || 
+                        msg.message?.videoMessage?.mimetype || '';
+
+            // Validate media type
+            if (!/image|video|webp/.test(mime)) {
+                return reply('Reply to an image, video, or sticker');
+            }
+
+            await reply('Converting to premium sticker...');
+
+            // Download media
+            let media = null;
+            try {
+                if (quoted.mediaType === 'image' || /image/.test(mime)) {
+                    media = quoted.imageData || msg.message?.imageMessage?.imageData;
+                } else if (quoted.mediaType === 'video' || /video/.test(mime)) {
+                    media = quoted.videoData || msg.message?.videoMessage?.videoData;
+                } else {
+                    media = quoted.stickerData || msg.message?.stickerMessage?.fileSha256;
+                }
+
+                if (!media) {
+                    // Fallback: try to get media through socket's media download
+                    media = await sock.downloadMediaMessage(msg);
+                }
+            } catch (err) {
+                console.error('[media download]', err.message);
+                return reply('Failed to download media');
+            }
+
+            if (!media) {
+                return reply('Could not extract media');
+            }
+
+            // Create temp directory
+            const tempDir = path.join(__dirname, '../../temp');
+            if (!fs.existsSync(tempDir)) {
+                fs.mkdirSync(tempDir, { recursive: true });
+            }
+
+            const timestamp = Date.now();
+            const input = path.join(tempDir, `sprem_${timestamp}`);
+            const output = `${input}.webp`;
+
+            try {
+                fs.writeFileSync(input, media);
+            } catch (err) {
+                console.error('[write temp]', err.message);
+                return reply('Failed to save temporary file');
+            }
+
+            // Convert to webp based on media type
+            try {
+                if (/webp/.test(mime)) {
+                    // Already WebP - just copy
+                    fs.copyFileSync(input, output);
+                } else if (/video/.test(mime)) {
+                    // Video to animated sticker
+                    const videoCmd = `ffmpeg -y -i "${input}" -vf "fps=15,scale=512:512:force_original_aspect_ratio=increase,crop=512:512:(iw-ow)/2:(ih-oh)/2,format=yuva420p" -c:v libwebp -lossless 0 -q:v 70 -loop 0 -an -preset default -compression_level 6 "${output}"`;
+                    
+                    await new Promise((resolve, reject) => {
+                        exec(videoCmd, (err) => {
+                            if (err) {
+                                console.error('[ffmpeg video]', err.message);
+                                reject(err);
+                            } else {
+                                resolve();
+                            }
+                        });
+                    });
+                } else {
+                    // Image to sticker
+                    const imgCmd = `ffmpeg -y -i "${input}" -vf "scale=512:512:force_original_aspect_ratio=increase,crop=512:512:(iw-ow)/2:(ih-oh)/2,format=yuva420p" -c:v libwebp -lossless 0 -q:v 80 -an "${output}"`;
+                    
+                    await new Promise((resolve, reject) => {
+                        exec(imgCmd, (err) => {
+                            if (err) {
+                                console.error('[ffmpeg image]', err.message);
+                                reject(err);
+                            } else {
+                                resolve();
+                            }
+                        });
+                    });
+                }
+            } catch (err) {
+                console.error('[conversion]', err.message);
+                // Cleanup on failure
+                try {
+                    if (fs.existsSync(input)) fs.unlinkSync(input);
+                    if (fs.existsSync(output)) fs.unlinkSync(output);
+                } catch {}
+                return reply('Conversion failed');
+            }
+
+            // Read converted WebP
+            let stickerBuffer = null;
+            try {
+                stickerBuffer = fs.readFileSync(output);
+            } catch (err) {
+                console.error('[read output]', err.message);
+                return reply('Failed to read converted sticker');
+            }
+
+            // Add EXIF metadata
+            try {
+                stickerBuffer = await addExif(stickerBuffer, 'SUKUNA MD', 'sukuna', ['🔥']);
+            } catch (err) {
+                console.error('[exif]', err.message);
+                // Continue with untagged sticker if exif fails
+            }
+
+            // Send as premium sticker
+            try {
+                await sock.sendMessage(from, {
+                    sticker: stickerBuffer,
+                    premium: 1
+                }, { quoted: msg });
+
+                await reply('✓ Premium sticker sent!');
+            } catch (err) {
+                console.error('[send sticker]', err.message);
+                return reply('Failed to send sticker');
+            }
+
+            // Cleanup
+            try {
+                if (fs.existsSync(input)) fs.unlinkSync(input);
+                if (fs.existsSync(output)) fs.unlinkSync(output);
+            } catch (err) {
+                console.error('[cleanup]', err.message);
+            }
+
+        } catch (err) {
+            console.error('[sprem]', err.message);
+            reply('Sticker conversion failed');
+        }
+    }
+};

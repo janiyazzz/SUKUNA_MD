@@ -159,46 +159,33 @@ module.exports = {
             );
         }
 
-        // ── 3. Send a "working…" status ───────────────────────────────────
-        await reply(`👁️ _Revealing view-once ${mediaType}… Please wait._`);
-
-        // ── 4. Download and re-send ───────────────────────────────────────
+        // ── 3. Download and re-send (clean, no text) ───────────────────────
         try {
             const buffer = await downloadMedia(mediaMsg, mediaType);
 
-            const revealCaption =
-                `╔══════════════════════════════╗\n` +
-                `║   👁️  *VIEW ONCE REVEALED*     ║\n` +
-                `╚══════════════════════════════╝\n\n` +
-                `> _Revealed by SUKUNA MD_ 👹`;
-
             if (mediaType === 'image') {
                 await sock.sendMessage(from, {
-                    image:   buffer,
-                    caption: revealCaption,
+                    image: buffer,
                 }, { quoted: msg });
 
             } else if (mediaType === 'video') {
                 await sock.sendMessage(from, {
-                    video:    buffer,
-                    caption:  revealCaption,
+                    video: buffer,
                     mimetype: mediaMsg.mimetype || 'video/mp4',
                 }, { quoted: msg });
 
             } else if (mediaType === 'audio') {
                 await sock.sendMessage(from, {
-                    audio:    buffer,
+                    audio: buffer,
                     mimetype: mediaMsg.mimetype || 'audio/ogg; codecs=opus',
-                    ptt:      !!mediaMsg.ptt,
+                    ptt: !!mediaMsg.ptt,
                 }, { quoted: msg });
-                await reply(revealCaption);
 
             } else if (mediaType === 'document') {
                 await sock.sendMessage(from, {
-                    document:  buffer,
-                    mimetype:  mediaMsg.mimetype || 'application/octet-stream',
-                    fileName:  mediaMsg.fileName || 'revealed_file',
-                    caption:   revealCaption,
+                    document: buffer,
+                    mimetype: mediaMsg.mimetype || 'application/octet-stream',
+                    fileName: mediaMsg.fileName || 'file',
                 }, { quoted: msg });
             }
 

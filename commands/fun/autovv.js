@@ -1,47 +1,11 @@
 /**
- * AutoViewOnce Command — Auto-send media as view-once
- * Reply to any image/video with .autovv to send it as a view-once message
- * Clean, minimal output - just the media with no text or borders
- * Usage: .autovv (reply to an image or video)
+ * AutoVV Command — Auto-forward group media to owner DM as view-once
+ * Automatically listens for photos/videos sent in groups
+ * When detected, sends them to owner's DM as view-once messages
  */
 
 const { downloadContentFromMessage } = require('@crysnovax/baileys');
 
-/**
- * Extract the quoted / replied-to message from a message object.
- */
-function getQuotedMessage(msg) {
-    const msgContent = msg.message;
-    if (!msgContent) return null;
-
-    const contextInfo =
-        msgContent?.extendedTextMessage?.contextInfo ||
-        msgContent?.imageMessage?.contextInfo       ||
-        msgContent?.videoMessage?.contextInfo       ||
-        msgContent?.audioMessage?.contextInfo       ||
-        msgContent?.documentMessage?.contextInfo    ||
-        msgContent?.stickerMessage?.contextInfo     ||
-        msgContent?.buttonsResponseMessage?.contextInfo ||
-        msgContent?.listResponseMessage?.contextInfo ||
-        msgContent?.templateButtonReplyMessage?.contextInfo ||
-        null;
-
-    return contextInfo?.quotedMessage || null;
-}
-
-/**
- * Find media in a message object.
- */
-function findMedia(msgObj) {
-    if (!msgObj) return null;
-    if (msgObj.imageMessage) return { mediaType: 'image', mediaMsg: msgObj.imageMessage };
-    if (msgObj.videoMessage) return { mediaType: 'video', mediaMsg: msgObj.videoMessage };
-    return null;
-}
-
-/**
- * Download a media message into a Buffer with retries.
- */
 async function downloadMedia(mediaMsg, mediaType, retries = 3) {
     let lastErr;
     for (let attempt = 1; attempt <= retries; attempt++) {
@@ -65,61 +29,45 @@ async function downloadMedia(mediaMsg, mediaType, retries = 3) {
 }
 
 module.exports = {
-    name: 'autoviewonce',
-    aliases: ['autovv', 'vvme'],
-    description: 'Send media as a view-once message',
-    usage: '.autovv (reply to an image or video)',
-    category: 'fun',
+    name: 'autovv',
+    alias: ['autovv', 'autovvme'],
+    desc: 'Auto-forward group media to owner DM as view-once',
+    category: 'Utility',
+    isListener: true,
 
-    async execute({ sock, msg, from, reply }) {
-        // ── 1. Get the quoted message ─────────────────────────────────────
-        const quotedMsg = getQuotedMessage(msg);
+    execute: async (context) => {
+        const { sock, msg, from } = context;
 
-        if (!quotedMsg) {
-            return reply('Reply to an image or video to send it as view-once.');
-        }
+        // Only trigger in groups
+        if (!from.includes('@g.us')) return;
 
-        // ── 2. Find media ─────────────────────────────────────────────────
-        const found = findMedia(quotedMsg);
+        const OWNER_ID = process.env.OWNER_ID || '1234567890@s.whatsapp.net';
 
-        if (!found) {
-            return reply('That message does not contain an image or video.');
-        }
-
-        const { mediaType, mediaMsg } = found;
-
-        // ── 3. Download media ─────────────────────────────────────────────
         try {
-            const buffer = await downloadMedia(mediaMsg, mediaType);
-
-            // ── 4. Send as view-once with no text or borders ───────────────
-            if (mediaType === 'image') {
-                await sock.sendMessage(from, {
-                    image: buffer,
-                    viewOnce: true,
-                }, { quoted: msg });
-
-            } else if (mediaType === 'video') {
-                await sock.sendMessage(from, {
-                    video: buffer,
-                    mimetype: mediaMsg.mimetype || 'video/mp4',
-                    viewOnce: true,
-                }, { quoted: msg });
+            // Check for image
+            if (msg.message?.imageMessage) {
+                const buffer = await downloadMedia(msg.message.imageMessage, 'image');
+                if (buffer && buffer.length > 0) {
+                    await sock.sendMessage(OWNER_ID, {
+                        image: buffer,
+                    });
+                }
+                return;
             }
 
-            // Send success reaction
-            await sock.sendMessage(from, {
-                react: { text: '👁️', key: msg.key }
-            }).catch(() => {});
-
+            // Check for video
+            if (msg.message?.videoMessage) {
+                const buffer = await downloadMedia(msg.message.videoMessage, 'video');
+                if (buffer && buffer.length > 0) {
+                    await sock.sendMessage(OWNER_ID, {
+                        video: buffer,
+                        mimetype: msg.message.videoMessage.mimetype || 'video/mp4',
+                    });
+                }
+                return;
+            }
         } catch (err) {
-            console.error('[AUTOVV] Download failed:', err.message);
-
-            if (err.message?.includes('Not Found') || err.message?.includes('404')) {
-                return reply('Message expired or already deleted.');
-            }
-
-            return reply('Failed to process media. Please try again.');
+            console.error('[autovv]', err.message);
         }
     }
 };

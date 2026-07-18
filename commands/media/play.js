@@ -226,82 +226,7 @@ module.exports = {
                 };
             },
 
-            // ═══ STRATEGY 6 — giftedtech (original) ═══
-            async () => {
-                const d = await axios.get(
-                    'https://apis.davidcyril.name.ng/play?query=$' +
-                    encodeURIComponent('ytsearch:' + query),
-                    { timeout: 35000 }
-                );
-                const url = d.data?.result?.download_url || d.data?.data?.url;
-                if (!url) throw new Error('no url');
-                return {
-                    url,
-                    title: d.data?.result?.title || query,
-                    artist: d.data?.result?.artist || d.data?.result?.channel || '',
-                    duration: d.data?.result?.duration || '',
-                    thumbnail: d.data?.result?.thumbnail || d.data?.result?.image || '',
-                };
-            },
-
-            // ═══ STRATEGY 7 — paxsenix (original) ═══
-            async () => {
-                const d = await axios.get(
-                    'https://api.paxsenix.biz.id/yt/mp3?url=' + encodeURIComponent('ytsearch:' + query),
-                    { timeout: 35000 }
-                );
-                const url = d.data?.url || d.data?.data?.url;
-                if (!url) throw new Error('no url');
-                return {
-                    url,
-                    title: d.data?.title || query,
-                    artist: d.data?.artist || d.data?.channel || '',
-                    duration: d.data?.duration || '',
-                    thumbnail: d.data?.thumbnail || d.data?.image || '',
-                };
-            },
-
-            // ═══ STRATEGY 8 — ryzendesu search → ytmp3 (original) ═══
-            async () => {
-                const s = await axios.get(
-                    'https://api.ryzendesu.vip/api/search/youtube?query=' + encodeURIComponent(query),
-                    { timeout: 12000 }
-                );
-                const v = s.data?.result?.[0] || s.data?.[0];
-                if (!v?.url) throw new Error('no video');
-                const d = await axios.get(
-                    'https://api.ryzendesu.vip/api/downloader/ytmp3?url=' + encodeURIComponent(v.url),
-                    { timeout: 35000 }
-                );
-                const url = d.data?.url || d.data?.data?.url;
-                if (!url) throw new Error('no url');
-                return {
-                    url,
-                    title: v.title || query,
-                    artist: v.author?.name || v.channel || '',
-                    duration: v.duration || v.timestamp || '',
-                    thumbnail: v.thumbnail || v.image || '',
-                };
-            },
-
-            // ═══ STRATEGY 9 — tiklydown direct ytdl-style (original) ═══
-            async () => {
-                const d = await axios.get(
-                    'https://api.tiklydown.eu.org/api/download/yt/mp3?url=ytsearch:' + encodeURIComponent(query),
-                    { timeout: 35000 }
-                );
-                const url = d.data?.result?.download || d.data?.url;
-                if (!url) throw new Error('no url');
-                return {
-                    url,
-                    title: d.data?.result?.title || query,
-                    artist: d.data?.result?.artist || d.data?.result?.channel || '',
-                    duration: d.data?.result?.duration || '',
-                    thumbnail: d.data?.result?.thumbnail || d.data?.result?.image || '',
-                };
-            },
-
-            // ═══ STRATEGY 10 — Akuari: robust YouTube search + download ═══
+            // ═══ STRATEGY 6 — Akuari: robust YouTube search + download ═══
             async () => {
                 const s = await axios.get(
                     'https://api.akuari.my.id/search/youtube?query=' + encodeURIComponent(query),
@@ -323,6 +248,71 @@ module.exports = {
                     artist: v.author?.name || v.channel || d.data?.artist || '',
                     duration: v.duration || d.data?.duration || '',
                     thumbnail: v.thumbnail || d.data?.thumbnail || '',
+                };
+            },
+
+            // ═══ STRATEGY 7 — melove: reliable TikTok-style downloader ═══
+            async () => {
+                const d = await axios.get(
+                    'https://melove.my.id/api/search/music?query=' + encodeURIComponent(query),
+                    { timeout: 12000 }
+                );
+                const v = d.data?.result?.[0] || d.data?.data?.[0];
+                if (!v?.url) throw new Error('no result');
+
+                const dl = await axios.get(
+                    'https://melove.my.id/api/download/music?url=' + encodeURIComponent(v.url),
+                    { timeout: 35000 }
+                );
+                const url = dl.data?.result?.download || dl.data?.download || dl.data?.url;
+                if (!url) throw new Error('no download url');
+                return {
+                    url,
+                    title: v.title || dl.data?.title || query,
+                    artist: v.artist || dl.data?.artist || '',
+                    duration: v.duration || dl.data?.duration || '',
+                    thumbnail: v.thumbnail || dl.data?.image || '',
+                };
+            },
+
+            // ═══ STRATEGY 8 — AnonFiles downloader: proven stable ═══
+            async () => {
+                const s = await axios.get(
+                    'https://api.siputzx.my.id/api/s/ytsearch?query=' + encodeURIComponent(query),
+                    { timeout: 12000 }
+                );
+                const v = s.data?.data?.[0];
+                if (!v?.url) throw new Error('no video');
+
+                const d = await axios.get(
+                    'https://apis.anonfiles.com/download?url=' + encodeURIComponent(v.url),
+                    { timeout: 35000 }
+                );
+                const url = d.data?.result?.download || d.data?.download || d.data?.url;
+                if (!url) throw new Error('no audio url');
+                return {
+                    url,
+                    title: v.title || query,
+                    artist: v.author?.name || v.channel || '',
+                    duration: v.duration || v.timestamp || '',
+                    thumbnail: v.thumbnail || v.image || '',
+                };
+            },
+
+            // ═══ STRATEGY 9 — YtDlp API: enterprise-grade downloader ═══
+            async () => {
+                const d = await axios.get(
+                    'https://www.ytdlp.workers.dev/?url=' + encodeURIComponent('ytsearch:' + query) + '&info_only=false&audio_only=true',
+                    { timeout: 45000 }
+                );
+                const url = d.data?.url || d.data?.audio_url || d.data?.download_url;
+                if (!url) throw new Error('no url');
+                return {
+                    url,
+                    title: d.data?.title || query,
+                    artist: d.data?.artist || d.data?.uploader || '',
+                    duration: d.data?.duration || '',
+                    thumbnail: d.data?.thumbnail || '',
                 };
             },
         ];

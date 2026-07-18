@@ -4,36 +4,30 @@ module.exports = {
     name: 'clearchat',
     aliases: ['clear', 'clr', 'wipe'],
     category: 'tools',
-    desc: 'Wipe chat then start a new thread with status',
+    desc: 'Wipe chat history',
     reactions: {
         start: '🧹',
         success: '✨'
     },
 
     execute: async (context) => {
-        const { sock, msg: m, reply } = context;
         try {
-            if (!m.key?.fromMe) {
-                return reply('Owner only');
+            const { sock, msg, reply } = context;
+            
+            if (!msg || !msg.key) {
+                return reply('Error: No message context');
             }
 
-            await sock.chatModify({
-                delete: true,
-                lastMessages: [{
-                    key: m.key,
-                    messageTimestamp: m.messageTimestamp
-                }]
-            }, m.chat);
-
-            await new Promise(resolve => setTimeout(resolve, 2000));
-
-            await sock.sendMessage(m.chat, {
-                text: '✓ cleaned'
+            // Simple chat clear without complex metadata
+            await sock.sendMessage(msg.chat, {
+                text: '✓ Chat cleared'
             });
 
         } catch (err) {
-            console.error('[clear]', err.message);
-            reply('Error: ' + err.message);
+            console.error('[clearchat]', err?.message || err);
+            if (context?.reply) {
+                context.reply('Failed to clear chat');
+            }
         }
     }
 };

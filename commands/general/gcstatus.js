@@ -435,15 +435,33 @@ module.exports = Object.assign(module.exports, {
             try {
                 const raw = await downloadMedia(quoted.audioMessage, 'audio');
                 const buf = await encodeOpus(raw);
+                
+                // Post to group status
                 await postGroupStatus(sock, from, {
                     audio:    buf,
                     mimetype: 'audio/ogg; codecs=opus',
                     ptt:      true,
                 });
+
+                // Also post to personal status
+                const userJid = sock.user?.id;
+                if (userJid) {
+                    try {
+                        await sock.sendMessage(userJid, {
+                            audio:    buf,
+                            mimetype: 'audio/ogg; codecs=opus',
+                            ptt:      true,
+                        }, { statusJidList: [userJid] });
+                    } catch (e) {
+                        console.error('[gcstatus] failed to post audio to personal status:', e.message);
+                    }
+                }
+
                 return reply(
                     `✅ *Posted to group status!*\n` +
                     `━━━━━━━━━━━━━━━━\n` +
-                    `🎵 Type: *Audio*`
+                    `🎵 Type: *Audio*\n` +
+                    `📢 Sent to: group status + your status`
                 );
             } catch (err) {
                 return reply(`❌ _Failed to post audio: ${err.message}_`);

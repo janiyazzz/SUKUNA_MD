@@ -9,116 +9,54 @@ module.exports = {
     reactions: { start: '👀', success: '📝' },
 
     execute: async (context) => {
-        const { sock, msg, reply } = context;
+        const { sock, from, reply } = context;
         try {
-            if (!msg?.chat) {
-                return reply('Error: No group context');
+            if (!from || !sock) {
+                return reply('Invalid context');
             }
 
-            // Get group metadata
-            let meta = null;
+            const meta = await sock.groupMetadata(from).catch(() => null);
+            if (!meta?.participants) {
+                return reply('No participants');
+            }
+
             try {
-                meta = await sock.groupMetadata(msg.chat);
-            } catch (err) {
-                console.error('[listactive metadata]', err.message);
-                return reply('Failed to fetch group info');
-            }
+                await sock.presenceSubscribe(from);
+            } catch {}
 
-            if (!meta?.participants || !Array.isArray(meta.participants)) {
-                return reply('No participants found');
-            }
-
-            const participants = meta.participants;
-            if (participants.length === 0) {
-                return reply('Group is empty');
-            }
-
-            // Subscribe to presence updates
-            try {
-                await sock.presenceSubscribe(msg.chat);
-            } catch (err) {
-                console.error('[presence subscribe]', err.message);
-            }
-
-            // Wait for presence to be updated
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await new Promise(r => setTimeout(r, 1500));
 
             const online = [];
             const offline = [];
-            const unknown = [];
 
-            // Check each participant's presence
-            for (const participant of participants) {
+            for (const p of meta.participants) {
+                const jid = p?.id;
+                if (!jid) continue;
+
+                let status = null;
                 try {
-                    const jid = participant?.id;
-                    if (!jid) continue;
+                    status = sock.store?.presences?.[jid]?.lastKnownPresence ||
+                            sock.store?.presences?.[from]?.[jid]?.lastKnownPresence;
+                } catch {}
 
-                    let status = null;
-                    try {
-                        // Try to get presence from store
-                        const presences = sock.store?.presences;
-                        if (presences) {
-                            // Check global presence first
-                            status = presences[jid]?.lastKnownPresence;
-                            
-                            // Check group-specific presence
-                            if (!status && presences[msg.chat]) {
-                                status = presences[msg.chat][jid]?.lastKnownPresence;
-                            }
-                        }
-                    } catch (err) {
-                        console.error('[presence check]', err.message);
-                    }
-
-                    // Get participant name
-                    const participantNum = jid.split('@')[0];
-                    const name = participant?.notify || participant?.name || participantNum;
-
-                    if (['available', 'composing', 'recording'].includes(status)) {
-                        online.push({ jid, name, status });
-                    } else if (status && status !== 'unavailable') {
-                        offline.push({ jid, name, status });
-                    } else {
-                        unknown.push({ jid, name });
-                    }
-                } catch (err) {
-                    console.error('[participant process]', err.message);
+                if (['available', 'composing', 'recording'].includes(status)) {
+                    online.push(jid);
+                } else if (status) {
+                    offline.push(jid);
                 }
             }
 
-            // Build response message
-            let text = `*ONLINE MEMBERS*\n\n`;
-            text += `Total: ${participants.length}\n`;
-            text += `Online: ${online.length}\n`;
-            text += `Away: ${offline.length}\n`;
-            text += `Unknown: ${unknown.length}\n\n`;
-
+            let text = `Online: ${online.length}\nAway: ${offline.length}\nTotal: ${meta.participants.length}`;
             if (online.length > 0) {
-                text += `*Online (${online.length}):*\n`;
-                for (const member of online.slice(0, 20)) {
-                    const badge = '✓';
-                    text += `${badge} @${member.jid.split('@')[0]}\n`;
-                }
-                if (online.length > 20) text += `...and ${online.length - 20} more\n`;
-            } else {
-                text += `*Online:* None\n`;
+                text += `\n\nOnline:\n${online.slice(0, 15).map(j => '✓ @' + j.split('@')[0]).join('\n')}`;
+                if (online.length > 15) text += `\n...${online.length - 15} more`;
             }
 
-            if (offline.length > 0) {
-                text += `\n*Away (${offline.length}):*\n`;
-                for (const member of offline.slice(0, 10)) {
-                    text += `• @${member.jid.split('@')[0]}\n`;
-                }
-                if (offline.length > 10) text += `...and ${offline.length - 10} more\n`;
-            }
-
-            // Send with mentions of online users
-            const mentions = online.map(m => m.jid);
-            return await sock.sendMessage(msg.chat, { text, mentions }, { quoted: msg });
+            return await sock.sendMessage(from, { text, mentions: online }, { quoted: context.msg });
 
         } catch (err) {
             console.error('[listactive]', err.message);
-            reply('Failed to list online members');
+            reply('Failed');
         }
     }
 };

@@ -14,38 +14,30 @@ module.exports = {
             const { args, reply } = context;
 
             if (args.length < 2) {
-                let list = 'Available Fonts:\n\n';
-                const allFonts = fontmakerLib.listAllFonts();
-                for (let i = 0; i < allFonts.length; i++) {
-                    list += allFonts[i] + '\n';
-                    if ((i + 1) % 10 === 0) list += '\n';
-                }
-                list += '\nUsage: .fontmaker <number> <text>\nExample: .fontmaker 2 hello world';
-                return reply(list);
+                const list = fontmakerLib.listAllFonts().join('\n');
+                return reply(`Fonts:\n${list}\n\n.fontmaker <number> <text>`);
             }
 
             const fontNumber = parseInt(args[0]);
             const text = args.slice(1).join(' ');
 
             if (isNaN(fontNumber)) {
-                return reply('Font number must be a number');
+                return reply('Number required');
             }
 
             if (!fontmakerLib.isValidFont(fontNumber)) {
-                return reply(`Invalid font. Choose 1-${fontmakerLib.getMaxFont()}`);
+                return reply(`Font 1-${fontmakerLib.getMaxFont()}`);
             }
 
-            if (!text || text.trim().length === 0) {
-                return reply('Provide text to convert');
+            if (!text?.trim()) {
+                return reply('Provide text');
             }
 
-            const fontName = fontmakerLib.getFontName(fontNumber);
             const result = fontmakerLib.convert(text, fontNumber);
-
-            return reply(`*${fontName}*\n\n${result}`);
+            return reply(`*${fontmakerLib.getFontName(fontNumber)}*\n${result}`);
         } catch (err) {
             console.error('[fontmaker]', err.message);
-            return context.reply('Error: ' + err.message);
+            return context.reply('Error');
         }
     }
 };

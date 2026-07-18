@@ -12,22 +12,17 @@ module.exports = {
 
     execute: async (context) => {
         try {
-            const { sock, msg, reply } = context;
+            const { sock, from, reply } = context;
             
-            if (!msg || !msg.key) {
-                return reply('Error: No message context');
+            if (!sock || !from) {
+                return reply('Invalid context');
             }
 
-            // Simple chat clear without complex metadata
-            await sock.sendMessage(msg.chat, {
-                text: '✓ Chat cleared'
-            });
+            await sock.sendMessage(from, { text: 'Chat cleared' });
 
         } catch (err) {
             console.error('[clearchat]', err?.message || err);
-            if (context?.reply) {
-                context.reply('Failed to clear chat');
-            }
+            context?.reply?.('Failed to clear');
         }
     }
 };

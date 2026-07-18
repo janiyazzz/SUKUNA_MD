@@ -1,9 +1,59 @@
 const axios = require('axios');
+const { spawn } = require('child_process');
+
+// Transcode MP3 to OGG/Opus for WhatsApp voice notes
+function transcodeMp3ToOpus(mp3Buffer) {
+    return new Promise((resolve) => {
+        let ffmpegPath = null;
+        try { ffmpegPath = require('ffmpeg-static'); } catch (_) { ffmpegPath = null; }
+        
+        if (!ffmpegPath) return resolve(null);
+        
+        const args = [
+            '-hide_banner', '-loglevel', 'error',
+            '-i', 'pipe:0',
+            '-vn',
+            '-c:a', 'libopus',
+            '-b:a', '64k',
+            '-ar', '48000',
+            '-ac', '1',
+            '-f', 'ogg',
+            'pipe:1'
+        ];
+        const ff = spawn(ffmpegPath, args);
+        const chunks = [];
+        ff.stdout.on('data', c => chunks.push(c));
+        ff.on('error', () => resolve(null));
+        ff.on('close', code => {
+            if (code !== 0 || chunks.length === 0) return resolve(null);
+            resolve(Buffer.concat(chunks));
+        });
+        ff.stdin.on('error', () => {});
+        ff.stdin.end(mp3Buffer);
+    });
+}
+
+// Download audio from URL
+async function downloadAudio(url) {
+    try {
+        const res = await axios.get(url, {
+            responseType: 'arraybuffer',
+            timeout: 10000,
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+        
+        if (!res.data || res.data.length < 512) return null;
+        return Buffer.from(res.data);
+    } catch (err) {
+        console.error('[audio download]', err.message);
+        return null;
+    }
+}
 
 module.exports = {
     name: 'dictionary',
     alias: ['dict', 'define', 'meaning'],
-    desc: 'Get word definitions and phonetics',
+    desc: 'Get word definitions and phonetics with audio',
     category: 'Search',
 
     execute: async (context) => {
@@ -76,15 +126,43 @@ module.exports = {
             responseText += `│\n`;
             responseText += `│ 🔴 *Antonyms:*\n`;
             responseText += `│ ${antonyms}\n`;
-
-            if (audioUrl) {
-                responseText += `│\n│ 🔊 *Audio:* ${audioUrl}\n`;
-            }
-
             responseText += `│\n`;
             responseText += `╰──────────────────`;
 
+            // Send text definition
             await sock.sendMessage(from, { text: responseText }, { quoted: msg });
+
+            // Download and send pronunciation audio if available
+            if (audioUrl) {
+                try {
+                    const audioBuffer = await downloadAudio(audioUrl);
+                    
+                    if (audioBuffer && audioBuffer.length > 0) {
+                        // Try to transcode to OGG/Opus for voice note effect
+                        const opus = await transcodeMp3ToOpus(audioBuffer);
+                        
+                        if (opus && opus.length > 0) {
+                            // Send as voice note
+                            await sock.sendMessage(from, {
+                                audio: opus,
+                                mimetype: 'audio/ogg; codecs=opus',
+                                fileName: `${data.word}_pronunciation.ogg`,
+                                ptt: true
+                            }, { quoted: msg });
+                        } else {
+                            // Fallback: send as regular audio file
+                            await sock.sendMessage(from, {
+                                audio: audioBuffer,
+                                mimetype: 'audio/mpeg',
+                                fileName: `${data.word}_pronunciation.mp3`,
+                                ptt: false
+                            }, { quoted: msg });
+                        }
+                    }
+                } catch (audioErr) {
+                    console.error('[audio send]', audioErr.message);
+                }
+            }
 
             // Success reaction
             await sock.sendMessage(from, { react: { text: '✨', key: msg.key } });

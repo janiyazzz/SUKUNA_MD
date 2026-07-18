@@ -138,23 +138,30 @@ module.exports = {
                     const audioBuffer = await downloadAudio(audioUrl);
                     
                     if (audioBuffer && audioBuffer.length > 0) {
+                        // Build caption with definition and example
+                        let audioCaption = `🎵 *${data.word}* - ${partOfSpeech}\n\n`;
+                        audioCaption += `📚 *Definition:*\n${definition}\n\n`;
+                        audioCaption += `💬 *Example:*\n${example}`;
+                        
                         // Try to transcode to OGG/Opus for voice note effect
                         const opus = await transcodeMp3ToOpus(audioBuffer);
                         
                         if (opus && opus.length > 0) {
-                            // Send as voice note
+                            // Send as voice note with caption
                             await sock.sendMessage(from, {
                                 audio: opus,
                                 mimetype: 'audio/ogg; codecs=opus',
                                 fileName: `${data.word}_pronunciation.ogg`,
+                                caption: audioCaption,
                                 ptt: true
                             }, { quoted: msg });
                         } else {
-                            // Fallback: send as regular audio file
+                            // Fallback: send as regular audio file with caption
                             await sock.sendMessage(from, {
                                 audio: audioBuffer,
                                 mimetype: 'audio/mpeg',
                                 fileName: `${data.word}_pronunciation.mp3`,
+                                caption: audioCaption,
                                 ptt: false
                             }, { quoted: msg });
                         }

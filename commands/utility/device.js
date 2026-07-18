@@ -45,10 +45,25 @@ module.exports = {
             const label = DEVICE_LABELS[device] || DEVICE_LABELS.unknown;
             const who = quotedId ? `@${String(targetSender).split('@')[0]}` : 'You';
 
-            return sock.sendMessage(m.chat, {
-                text: `${who} sent that message from: *${label}*`,
+            let pp = null;
+            try {
+                pp = await sock.profilePictureUrl(targetSender, 'image');
+            } catch (_) {}
+
+            const message = {
+                text: `${who}: *${label}*`,
                 mentions: quotedId && String(targetSender).includes('@') ? [targetSender] : [],
-            }, { quoted: m });
+            };
+
+            if (pp) {
+                return sock.sendMessage(m.chat, {
+                    image: { url: pp },
+                    caption: message.text,
+                    mentions: message.mentions,
+                }, { quoted: m });
+            }
+
+            return sock.sendMessage(m.chat, message, { quoted: m });
         } catch (err) {
             console.error('[device] error:', err.message);
             reply('Failed to detect device.');

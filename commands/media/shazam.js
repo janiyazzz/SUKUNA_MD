@@ -4,6 +4,7 @@ const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
 const axios = require('axios');
+const FormData = require('form-data');
 const yts = require('yt-search');
 const { downloadContentFromMessage } = require('@crysnovax/baileys');
 
@@ -79,7 +80,7 @@ async function searchSongInfo(query) {
 async function identifySong(audioFile) {
     try {
         // Use audd.io free API (no auth required for basic use)
-        const form = new (require('form-data'))();
+        const form = new FormData();
         form.append('file', fs.createReadStream(audioFile));
 
         const result = await axios.post('https://api.audd.io/', form, {
@@ -107,31 +108,84 @@ async function identifySong(audioFile) {
     }
 }
 
-// Download audio from YouTube
+// Download audio from YouTube using play command strategies
 async function downloadAudio(ytUrl) {
-    for (const api of FALLBACK_AUDIO_APIS(ytUrl)) {
-        try {
-            const { data } = await axios.get(api, { 
-                timeout: 10000,
-                headers: { 'User-Agent': 'Mozilla/5.0' }
-            });
-            
-            const downloadUrl = data?.result?.downloadUrl || 
-                               data?.data?.downloadUrl ||
-                               data?.download ||
-                               data?.url ||
-                               data?.link;
+    const strategies = [
+        // Strategy 1: Prexzyvilla Spotify download
+        async () => {
+            const d = await axios.get(
+                'https://apis.prexzyvilla.site/download/spotify?url=' + encodeURIComponent(ytUrl),
+                { timeout: 60000 }
+            );
+            const url = d.data?.download_url ?? d.data?.url ?? d.data?.audio
+                     ?? d.data?.link ?? d.data?.result?.url ?? d.data?.data?.url;
+            if (!url) throw new Error('no url');
+            return url;
+        },
 
+        // Strategy 2: Prexzyvilla YTDL
+        async () => {
+            const d = await axios.get(
+                'https://apis.prexzyvilla.site/download/ytdl?url=' + encodeURIComponent(ytUrl),
+                { timeout: 60000 }
+            );
+            let url = null;
+            if (Array.isArray(d.data?.formats)) {
+                const pref = [
+                    d.data.formats.find(f => f.type === 'audio' && f.format === 'mp3'),
+                    d.data.formats.find(f => f.type === 'audio' && f.format === 'm4a'),
+                    d.data.formats.find(f => f.type === 'audio'),
+                ];
+                for (const f of pref) { if (f?.url) { url = f.url; break; } }
+            }
+            url = url ?? d.data?.result?.download_url ?? d.data?.result?.url
+               ?? d.data?.download_url ?? d.data?.url
+               ?? d.data?.data?.url ?? d.data?.data?.download;
+            if (!url) throw new Error('no audio url');
+            return url;
+        },
+
+        // Strategy 3: siputzx ytmp3
+        async () => {
+            const d = await axios.get(
+                'https://api.siputzx.my.id/api/d/ytmp3?url=' + encodeURIComponent(ytUrl),
+                { timeout: 30000 }
+            );
+            const url = d.data?.data?.url || d.data?.url;
+            if (!url) throw new Error('no audio url');
+            return url;
+        },
+
+        // Strategy 4: apiskeith
+        async () => {
+            const d = await axios.get(
+                'https://apiskeith.top/download/audio?url=' + encodeURIComponent(ytUrl),
+                { timeout: 10000 }
+            );
+            const url = d.data?.result?.downloadUrl || d.data?.download || d.data?.url;
+            if (!url) throw new Error('no audio url');
+            return url;
+        },
+    ];
+
+    for (const strategy of strategies) {
+        try {
+            const downloadUrl = await strategy();
+            
             if (downloadUrl) {
                 const audio = await axios.get(downloadUrl, {
                     responseType: 'arraybuffer',
                     timeout: 30000,
                     headers: { 'User-Agent': 'Mozilla/5.0' }
                 });
-                return Buffer.from(audio.data);
+                
+                if (audio.data && audio.data.length > 0) {
+                    return Buffer.from(audio.data);
+                }
             }
         } catch (err) {
-            console.error('[download audio]', err.message);
+            console.error('[download strategy]', err.message);
+            continue;
         }
     }
     return null;

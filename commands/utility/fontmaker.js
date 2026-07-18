@@ -34,7 +34,7 @@ module.exports = {
             }
 
             const result = fontmakerLib.convert(text, fontNumber);
-            return reply(result);
+            return reply(result, { raw: true });
         } catch (err) {
             console.error('[fontmaker]', err.message);
             return context.reply('Error');

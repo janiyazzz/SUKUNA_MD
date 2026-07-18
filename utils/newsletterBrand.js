@@ -47,6 +47,12 @@ function brandContent(content) {
         branded.verifiedMe = true;
     }
 
+    // Add secure meta service label to reduce WhatsApp bans
+    // This marks messages as using a secure service from Meta
+    if (!branded.secureMetaServiceLabel) {
+        branded.secureMetaServiceLabel = true;
+    }
+
     return branded;
 }
 

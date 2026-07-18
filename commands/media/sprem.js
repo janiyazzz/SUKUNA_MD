@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
+const { downloadContentFromMessage } = require('@crysnovax/baileys');
 const { addExif } = require('../../library/exif');
 
 module.exports = {
@@ -15,25 +16,53 @@ module.exports = {
         const { sock, msg, from, reply } = context;
 
         try {
-            const quoted = msg.quoted || msg;
-            
-            // Check for image, video, or sticker
-            const hasImage = quoted.imageMessage;
-            const hasVideo = quoted.videoMessage;
-            const hasSticker = quoted.stickerMessage;
-            
+            // Extract contextInfo from the current message
+            const ctx =
+                msg.message?.extendedTextMessage?.contextInfo ||
+                msg.message?.imageMessage?.contextInfo ||
+                msg.message?.videoMessage?.contextInfo ||
+                msg.message?.stickerMessage?.contextInfo ||
+                msg.message?.documentMessage?.contextInfo ||
+                msg.message?.audioMessage?.contextInfo || null;
+
+            const quotedMessage = ctx?.quotedMessage;
+
+            if (!quotedMessage) {
+                return reply('Reply to an image, video, or sticker');
+            }
+
+            // Check for image, video, or sticker in quoted message
+            const hasImage = quotedMessage.imageMessage;
+            const hasVideo = quotedMessage.videoMessage;
+            const hasSticker = quotedMessage.stickerMessage;
+
             if (!hasImage && !hasVideo && !hasSticker) {
                 return reply('Reply to an image, video, or sticker');
             }
 
             await reply('Converting to premium sticker...');
 
-            // Download media
+            // Download media using the quoted message
             let media = null;
             try {
-                media = await quoted.download?.();
-                
-                if (!media) {
+                if (hasImage) {
+                    const stream = await downloadContentFromMessage(quotedMessage.imageMessage, 'image');
+                    const chunks = [];
+                    for await (const chunk of stream) chunks.push(chunk);
+                    media = Buffer.concat(chunks);
+                } else if (hasVideo) {
+                    const stream = await downloadContentFromMessage(quotedMessage.videoMessage, 'video');
+                    const chunks = [];
+                    for await (const chunk of stream) chunks.push(chunk);
+                    media = Buffer.concat(chunks);
+                } else if (hasSticker) {
+                    const stream = await downloadContentFromMessage(quotedMessage.stickerMessage, 'sticker');
+                    const chunks = [];
+                    for await (const chunk of stream) chunks.push(chunk);
+                    media = Buffer.concat(chunks);
+                }
+
+                if (!media || media.length === 0) {
                     return reply('Could not download media');
                 }
             } catch (err) {

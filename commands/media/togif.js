@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 const sharp = require('sharp');
+const { downloadContentFromMessage } = require('@crysnovax/baileys');
 
 module.exports = {
     name: 'togif',
@@ -13,24 +14,53 @@ module.exports = {
         try {
             const { sock, msg, from, reply } = context;
 
-            const quoted = msg.quoted || msg;
-            
-            // Check for sticker, image, or video
-            const hasSticker = quoted.stickerMessage;
-            const hasImage = quoted.imageMessage;
-            const hasVideo = quoted.videoMessage;
-            
+            // Extract contextInfo from the current message
+            const ctx =
+                msg.message?.extendedTextMessage?.contextInfo ||
+                msg.message?.imageMessage?.contextInfo ||
+                msg.message?.videoMessage?.contextInfo ||
+                msg.message?.stickerMessage?.contextInfo ||
+                msg.message?.documentMessage?.contextInfo ||
+                msg.message?.audioMessage?.contextInfo || null;
+
+            const quotedMessage = ctx?.quotedMessage;
+
+            if (!quotedMessage) {
+                return reply('Reply to a sticker, image, or video');
+            }
+
+            // Check for sticker, image, or video in quoted message
+            const hasSticker = quotedMessage.stickerMessage;
+            const hasImage = quotedMessage.imageMessage;
+            const hasVideo = quotedMessage.videoMessage;
+
             if (!hasSticker && !hasImage && !hasVideo) {
                 return reply('Reply to a sticker, image, or video');
             }
 
             await reply('⏳ Converting to GIF...');
 
-            // Download media
+            // Download media using the quoted message
             let mediaBuffer = null;
             try {
-                mediaBuffer = await quoted.download?.();
-                if (!mediaBuffer) {
+                if (hasImage) {
+                    const stream = await downloadContentFromMessage(quotedMessage.imageMessage, 'image');
+                    const chunks = [];
+                    for await (const chunk of stream) chunks.push(chunk);
+                    mediaBuffer = Buffer.concat(chunks);
+                } else if (hasVideo) {
+                    const stream = await downloadContentFromMessage(quotedMessage.videoMessage, 'video');
+                    const chunks = [];
+                    for await (const chunk of stream) chunks.push(chunk);
+                    mediaBuffer = Buffer.concat(chunks);
+                } else if (hasSticker) {
+                    const stream = await downloadContentFromMessage(quotedMessage.stickerMessage, 'sticker');
+                    const chunks = [];
+                    for await (const chunk of stream) chunks.push(chunk);
+                    mediaBuffer = Buffer.concat(chunks);
+                }
+
+                if (!mediaBuffer || mediaBuffer.length === 0) {
                     return reply('Cannot download media');
                 }
             } catch (err) {
@@ -45,16 +75,14 @@ module.exports = {
             let metadata = null;
             let isAnimated = false;
             
-            if (!isVideo) {
-                try {
-                    metadata = await sharp(mediaBuffer).metadata();
-                    isAnimated = metadata.pages > 1;
-                } catch (err) {
-                    console.error('[metadata]', err.message);
-                    return reply('Invalid media format');
-                }
-            } else {
-                isAnimated = true; // Videos are treated as animated
+            try {
+                metadata = await sharp(mediaBuffer).metadata();
+                isAnimated = (metadata.pages && metadata.pages > 1) || isVideo;
+            } catch (err) {
+                console.error('[metadata]', err.message);
+                // For videos, if sharp fails, just treat as animated
+                isAnimated = isVideo;
+                metadata = { pages: 1, delay: [100] };
             }
             const tempDir = path.join(process.cwd(), 'temp');
 

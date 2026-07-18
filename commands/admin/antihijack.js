@@ -4,9 +4,10 @@
  *
  * Robust + fast: cached group metadata, parallel reversals, retry with backoff,
  * loop guard, owner/sudo allowlist. The actual reversal logic lives in
- * lib/sessionManager.js → handleGroupParticipants().
+ * lib/promotionGuard.js → handleParticipantUpdate().
  */
 
+const { updateGroupConfig, getGroupConfig, setupPromotionGuard } = require('../../lib/promotionGuard');
 const database = require('../../utils/database');
 
 function boldItalic(str) {
@@ -23,16 +24,17 @@ function boldItalic(str) {
 
 module.exports = {
     name: 'antihijack',
-    aliases: ['adminguard', 'antidemote'],
+    aliases: ['adminguard'],
     description: 'Protect admin hierarchy — auto-reverse unauthorized promote/demote',
     category: 'admin',
 
-    async execute({ msg, reply, args, from, isGroup }) {
-        if (!isGroup) return reply('⛧ ' + boldItalic('Group only') + ' ⛧');
+    async execute(sock, m, { reply, args }) {
+        const groupId = m.chat;
+        if (!groupId.endsWith('@g.us')) return reply('⛧ ' + boldItalic('Group only') + ' ⛧');
 
         const action = (args[0] || '').toLowerCase();
-        const group  = database.getGroup(from);
-        const on = !!group.antihijack;
+        const settings = getGroupConfig(groupId);
+        const on = settings.antipromote || settings.antidemote;
 
         const card = (title, body) =>
             `╭─❒ ◈ ${boldItalic('SUKUNA · AntiHijack')} ❒\n` +
@@ -58,13 +60,14 @@ module.exports = {
             return reply(card(
                 boldItalic('Status'),
                 on
-                    ? `Active ✅\nHierarchy is locked.\nUnauthorized promotes get\nreversed instantly.`
+                    ? `Active ✅\nHierarchy is locked.\nUnauthorized promotes/demotes\nget reversed instantly.`
                     : `Inactive ❌\nEnable with .antihijack on`
             ));
         }
 
         if (action === 'on') {
-            database.setGroup(from, 'antihijack', true);
+            updateGroupConfig(groupId, { antipromote: true, antidemote: true });
+            setupPromotionGuard(sock);
             return reply(card(
                 boldItalic('Activated'),
                 `Protection : ON ✅\nReaction   : <1s\nRetries    : 3 × 400ms\nLoop guard : enabled\n\nBot must be admin.`
@@ -72,7 +75,7 @@ module.exports = {
         }
 
         // off
-        database.setGroup(from, 'antihijack', false);
+        updateGroupConfig(groupId, { antipromote: false, antidemote: false });
         return reply(card(
             boldItalic('Deactivated'),
             `Protection : OFF ❌\nHierarchy is no longer\nguarded by Sukuna.`

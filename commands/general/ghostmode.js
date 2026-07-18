@@ -1,89 +1,109 @@
-/**
- * ghostmode — Suppress every outgoing read & delivery receipt.
- *
- * When ON, anyone who messages the bot will see only a single grey tick ✓
- * (sent, not delivered) — making the account look offline — even though the
- * bot actually received and processed the message normally.
- *
- * This is the opposite of `.autoread`. Turning ghostmode ON automatically
- * turns autoread OFF so they don't fight each other.
- *
- * Usage:
- *   .ghostmode          → show current status
- *   .ghostmode on       → enable  (appear offline)
- *   .ghostmode off      → disable (normal receipts)
- *
- * Owner-only.
- */
-
 'use strict';
 
-const database = require('../../utils/database');
+const fs = require('fs');
+const path = require('path');
+
+// Storage (per-user or global toggle)
+const GHOST_FILE = path.join(__dirname, '../../../database/ghost-mode.json');
+
+let ghostEnabled = false;
+let ghostChats = new Set();
+
+try {
+    if (fs.existsSync(GHOST_FILE)) {
+        const data = JSON.parse(fs.readFileSync(GHOST_FILE, 'utf8'));
+        ghostEnabled = data.global || false;
+        if (data.chats) ghostChats = new Set(data.chats);
+    }
+} catch (e) {
+    console.error('[GHOST MODE] Load error:', e.message);
+}
+
+function saveGhost() {
+    try {
+        fs.writeFileSync(GHOST_FILE, JSON.stringify({
+            global: ghostEnabled,
+            chats: Array.from(ghostChats)
+        }, null, 2));
+    } catch (e) {}
+}
 
 module.exports = {
-    name:        'ghostmode',
-    aliases:     ['ghost', 'offlinemode', 'invisible'],
-    description: 'Appear offline — bot reads messages but sender sees only a single grey tick',
-    usage:       '.ghostmode [on|off]',
-    category:    'general',
-    ownerOnly:   true,
+    name: 'ghost',
+    aliases: ['ghostmode', 'invisible', 'stealth'],
+    desc: 'Appear offline to everyone while staying fully active',
+    category: 'owner',
+    usage: '.ghost on | .ghost off | .ghost status',
+    ownerOnly: true,
 
-    async execute({ sock, args, reply, phoneNumber }) {
-        const pn = phoneNumber
-            || (sock.user?.id || '').split(':')[0].split('@')[0].replace(/\D/g, '');
+    execute: async (sock, m, { args, reply }) => {
+        const sub = args[0]?.toLowerCase();
 
-        if (!pn) return reply('❌ Could not identify session — try again.');
-
-        const sub = (args[0] || '').toLowerCase();
-
-        if (!sub) {
-            const current = database.getGhostMode(pn);
-            const autoread = database.getAutoRead(pn);
+        if (!sub || sub === 'status') {
+            const status = ghostEnabled ? '🟢 ON (offline to others)' : '🔴 OFF (normal presence)';
             return reply(
-                `👻 *Ghost Mode*\n\n` +
-                `Status: ${current ? '✅ *ON*  (appearing offline)' : '❌ *OFF* (normal receipts)'}\n` +
-                (autoread && !current ? `⚠️  Auto-Read is ON — turning ghost ON will disable it.\n` : '') +
-                `\n` +
-                `• *ON*  — every receipt is suppressed. Senders see only a *single grey tick* ✓.\n` +
-                `        The bot still reads, processes & replies to every message.\n` +
-                `• *OFF* — normal behaviour: delivery (✓✓) and read (👁) receipts go through.\n\n` +
-                `*Toggle:* \`.ghostmode on\` / \`.ghostmode off\``
+                `👻 *Ghost Mode Status*\n\n` +
+                `Current: ${status}\n\n` +
+                `Toggle:\n` +
+                `• .ghost on   → appear offline while active\n` +
+                `• .ghost off  → back to normal`
             );
         }
 
-        if (['on', 'enable', '1', 'true', 'yes'].includes(sub)) {
-            database.setGhostMode(pn, true);
-            // Mutually exclusive with autoread — turning ghost ON forces
-            // autoread OFF, otherwise the two settings would fight.
-            const hadAutoread = database.getAutoRead(pn);
-            if (hadAutoread) database.setAutoRead(pn, false);
+        if (sub === 'on') {
+            if (ghostEnabled) return reply('👻 Ghost mode already active');
+
+            ghostEnabled = true;
+            saveGhost();
+
+            // Force offline presence immediately
+            await sock.sendPresenceUpdate('unavailable');
+
+            // Keep forcing unavailable every 30 seconds (WhatsApp resets presence)
+            const interval = setInterval(async () => {
+                if (!ghostEnabled) {
+                    clearInterval(interval);
+                    return;
+                }
+                try {
+                    await sock.sendPresenceUpdate('unavailable');
+                } catch {}
+            }, 30000);
 
             return reply(
-                `👻 *Ghost Mode Enabled*\n\n` +
-                `You now appear *offline* to anyone who messages this number.\n` +
-                `They'll see only a *single grey tick* ✓ on their messages,\n` +
-                `but the bot still receives and processes everything normally.\n\n` +
-                (hadAutoread ? `ℹ️  Auto-Read was turned OFF (can't co-exist with ghost mode).\n\n` : '') +
-                `Use \`.ghostmode off\` to go back to normal.`
+                `👻 *Ghost Mode ACTIVATED*\n\n` +
+                `• You now appear offline to everyone\n` +
+                `• Bot still reads/replies normally\n` +
+                `• Turn off with: .ghost off\n\n` +
+                `Stay hidden 😈`
             );
         }
 
-        if (['off', 'disable', '0', 'false', 'no'].includes(sub)) {
-            database.setGhostMode(pn, false);
+        if (sub === 'off') {
+            if (!ghostEnabled) return reply('👻 Ghost mode already off');
+
+            ghostEnabled = false;
+            saveGhost();
+
+            // Restore normal presence
+            await sock.sendPresenceUpdate('available');
+
             return reply(
-                `👻 *Ghost Mode Disabled*\n\n` +
-                `Receipts are back to normal — senders will once again see\n` +
-                `delivery (✓✓) and read (👁) ticks.\n\n` +
-                `Use \`.ghostmode on\` to hide again.`
+                `🔴 *Ghost Mode DEACTIVATED*\n\n` +
+                `• Normal online status restored\n` +
+                `• Everyone can see when you're active again`
             );
         }
 
-        return reply(
-            `⚠️ *Unknown option:* \`${args[0]}\`\n\n` +
-            `Usage:\n` +
-            `• \`.ghostmode\`      → show status\n` +
-            `• \`.ghostmode on\`   → enable\n` +
-            `• \`.ghostmode off\`  → disable`
-        );
-    },
+        reply('⚉ Invalid. Use .ghost on | off | status');
+    }
+};
+
+// Force ghost presence in messages.upsert
+module.exports.forceGhostPresence = async (sock) => {
+    if (ghostEnabled) {
+        try {
+            await sock.sendPresenceUpdate('unavailable');
+        } catch {}
+    }
 };

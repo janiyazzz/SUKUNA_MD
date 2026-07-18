@@ -193,35 +193,64 @@ module.exports = {
     
     handleShazamReply,
     
-    execute: async (sock, msg, { reply }) => {
-        const quoted = msg.quoted || msg;
-        const mime = quoted.mimetype || '';
+    execute: async (context) => {
+        const { sock, msg, from, reply } = context;
         
-        // Check if audio or video
-        if (!/audio|video/.test(mime)) {
+        // Extract contextInfo from the current message
+        const ctx =
+            msg.message?.extendedTextMessage?.contextInfo ||
+            msg.message?.imageMessage?.contextInfo ||
+            msg.message?.videoMessage?.contextInfo ||
+            msg.message?.audioMessage?.contextInfo ||
+            msg.message?.documentMessage?.contextInfo || null;
+
+        const quotedMessage = ctx?.quotedMessage;
+
+        if (!quotedMessage) {
             return reply('Reply to audio or video with .shazam\n\nAliases: .whatmusic, .identify, .findaudio');
         }
-        
+
+        // Check if audio or video
+        const hasAudio = quotedMessage.audioMessage;
+        const hasVideo = quotedMessage.videoMessage;
+
+        if (!hasAudio && !hasVideo) {
+            return reply('Reply to audio or video with .shazam\n\nAliases: .whatmusic, .identify, .findaudio');
+        }
+
         if (!ACR_CLOUD.access_key || !ACR_CLOUD.access_secret) {
             return reply('ACR Cloud not configured. Set ACR_KEY and ACR_SECRET env vars');
         }
-        
+
         const tempDir = ensureTempDir();
         let inputFile = null;
         let sampleFile = null;
-        
+
         try {
             // Download media
-            await sock.sendMessage(msg.chat, {
+            await sock.sendMessage(from, {
                 react: { text: '🔍', key: msg.key }
             }).catch(() => {});
+
+            const { downloadContentFromMessage } = require('@crysnovax/baileys');
             
-            const media = await quoted.download();
+            let media = null;
+            if (hasAudio) {
+                const stream = await downloadContentFromMessage(quotedMessage.audioMessage, 'audio');
+                const chunks = [];
+                for await (const chunk of stream) chunks.push(chunk);
+                media = Buffer.concat(chunks);
+            } else if (hasVideo) {
+                const stream = await downloadContentFromMessage(quotedMessage.videoMessage, 'video');
+                const chunks = [];
+                for await (const chunk of stream) chunks.push(chunk);
+                media = Buffer.concat(chunks);
+            }
             if (!media || media.length === 0) {
                 return reply('Failed to download media');
             }
-            
-            const ext = /video/.test(mime) ? 'mp4' : 'mp3';
+
+            const ext = hasVideo ? 'mp4' : 'mp3';
             inputFile = path.join(tempDir, 'shazam_' + Date.now() + '.' + ext);
             fs.writeFileSync(inputFile, media);
             
@@ -306,25 +335,25 @@ module.exports = {
             infoText += '╰──────────────────';
             
             // Send with thumbnail
-            const sentMsg = await sock.sendMessage(msg.chat, {
+            const sentMsg = await sock.sendMessage(from, {
                 image: { url: thumbnail },
                 caption: infoText
             }, { quoted: msg });
-            
+
             // Store session for download
-            const sessionKey = msg.chat + ':' + msg.sender;
+            const sessionKey = from + ':' + msg.sender;
             activeShazamSessions.set(sessionKey, {
                 messageId: sentMsg.key.id,
                 ytUrl,
                 title,
                 timestamp: Date.now()
             });
-            
+
             // Cleanup session after 5 minutes
             setTimeout(() => activeShazamSessions.delete(sessionKey), 5 * 60 * 1000);
-            
+
             // React
-            await sock.sendMessage(msg.chat, {
+            await sock.sendMessage(from, {
                 react: { text: '🎶', key: msg.key }
             }).catch(() => {});
             

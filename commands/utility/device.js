@@ -28,40 +28,47 @@ module.exports = {
     usage: '.device (reply to a message)',
 
     async execute(context) {
-        const { sock, msg: m, reply } = context;
+        const { sock, msg, reply } = context;
         try {
-            // Check if there's a quoted message
-            if (!m.quoted) {
+            // Access the context info for quoted message (proper structure)
+            const contextInfo = msg.message?.extendedTextMessage?.contextInfo || 
+                               msg.message?.contextInfo || 
+                               {};
+            
+            const quotedMessage = contextInfo?.quotedMessage;
+            const stanzaId = contextInfo?.stanzaId;
+
+            if (!quotedMessage && !stanzaId) {
                 return reply('Reply to a message with .device');
             }
 
-            // Get the message ID from the quoted message
-            const quotedMessage = m.quoted;
-            let quotedId = null;
-
-            // Try different ways to get the message ID
-            if (quotedMessage.key?.id) {
+            // Get the message ID - try multiple sources
+            let quotedId = stanzaId;
+            
+            if (!quotedId && quotedMessage?.key?.id) {
                 quotedId = quotedMessage.key.id;
-            } else if (quotedMessage.id) {
+            }
+            
+            if (!quotedId && quotedMessage?.id) {
                 quotedId = quotedMessage.id;
-            } else if (quotedMessage.message?.extendedTextMessage?.contextInfo?.stanzaId) {
-                quotedId = quotedMessage.message.extendedTextMessage.contextInfo.stanzaId;
             }
 
             if (!quotedId) {
                 return reply('Cannot read message ID');
             }
 
-            const targetSender = quotedMessage.sender || m.sender;
+            // Get sender from contextInfo participant or quoted message sender
+            const targetSender = contextInfo?.participant || quotedMessage?.sender || msg.sender;
+            
             const device = detectDevice(quotedId);
             const label = DEVICE_LABELS[device] || DEVICE_LABELS.unknown;
             const num = String(targetSender).split('@')[0];
 
             const text = `@${num}: *${label}*`;
-            return sock.sendMessage(m.chat, { text }, { quoted: m });
+            return sock.sendMessage(msg.chat, { text }, { quoted: msg });
         } catch (err) {
             console.error('[device]', err.message);
-            reply('Error: ' + err.message);
+            reply('Device check failed');
         }
     },
 

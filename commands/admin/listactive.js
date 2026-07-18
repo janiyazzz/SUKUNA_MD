@@ -1,97 +1,104 @@
-/**
- * List Active Members Command
- * Usage: .listactive
- *
- * Shows members currently online/active in WhatsApp (real-time presence)
- * Reads from WhatsApp's activity indicators - who is typing, recording, or online
- */
-
 'use strict';
 
 module.exports = {
-    name: 'listactive',
-    aliases: ['active', 'activemembers', 'online'],
-    description: 'Tag all currently active/online members (real-time)',
-    category: 'admin',
+    name: 'listonline',
+    aliases: ['active', 'here', 'whoisonline', 'onlinelist'],
+    desc: 'List online users in the group',
+    category: 'Admin',
+    groupOnly: true,
+    reactions: { start: '👀', success: '📝' },
 
-    async execute({ sock, msg, from, reply, isGroup, db }) {
-        if (!isGroup) {
-            return reply('This command only works in groups!');
-        }
-
+    execute: async (sock, m, { reply }) => {
         try {
-            const meta = await sock.groupMetadata(from);
+            const meta = await sock.groupMetadata(m.chat);
             const participants = meta.participants || [];
-            
-            const active = [];
-            const now = Date.now();
-            const FIVE_MINS = 5 * 60 * 1000;
-            
-            // Get global presence map from sessionManager
-            const userPresence = global._userPresence || new Map();
 
-            for (const participant of participants) {
-                const userJid = participant.id;
-                
-                // Check real-time presence from WhatsApp
-                const presence = userPresence.get(userJid);
-                let isActive = false;
-                let status = 'offline';
+            if (!participants.length) return reply('✘ No participants found');
 
-                if (presence) {
-                    const timeSinceUpdate = now - presence.timestamp;
-                    
-                    // Active if presence updated in last 5 minutes
-                    if (timeSinceUpdate < FIVE_MINS) {
-                        isActive = true;
-                        
-                        if (presence.state === 'composing') status = 'typing...';
-                        else if (presence.state === 'recording') status = 'recording...';
-                        else if (presence.state === 'available') status = 'online';
-                        else status = 'idle';
-                    }
-                }
+            // Subscribe to presence for this group
+            try { await sock.presenceSubscribe(m.chat); } catch {}
 
-                // Fallback: check recent messages if presence not available
-                if (!isActive && db) {
-                    const msgCount = db.getMessageCount?.(from, userJid) || 0;
-                    const lastSeen = db.getLastSeen?.(from, userJid) || 0;
-                    
-                    if (msgCount > 0 && lastSeen && (now - lastSeen < FIVE_MINS)) {
-                        isActive = true;
-                        status = 'messaging';
-                    }
-                }
+            // Give WhatsApp time to send presence updates
+            await reply('⚉ _Checking presence... please wait_');
+            await new Promise(r => setTimeout(r, 4000));
 
-                if (isActive) {
-                    active.push({
-                        jid: userJid,
-                        name: participant.pushName || 'Unknown',
-                        status: status
-                    });
-                }
+            const online = [];
+            const offline = [];
+
+            for (const p of participants) {
+                const jid = p.id;
+                const num = jid.split('@')[0];
+                const isAdmin = p.admin === 'admin' || p.admin === 'superadmin';
+
+                // Get name
+                let name = num;
+                try {
+                    const contacts = sock.store?.contacts;
+                    const contact = contacts instanceof Map
+                        ? contacts.get(jid)
+                        : contacts?.[jid];
+                    if (contact?.notify?.trim()) name = contact.notify;
+                    else if (contact?.name?.trim()) name = contact.name;
+                } catch {}
+
+                // Check presence from global set (set by presence.update event)
+                let status = null;
+                try {
+                    const p1 = sock.store?.presences?.[jid]?.lastKnownPresence;
+                    const p2 = sock.store?.presences?.[m.chat]?.[jid]?.lastKnownPresence;
+                    status = p1 || p2 || null;
+                } catch {}
+
+                if (!status && global.onlineUsers?.has(jid)) status = 'available';
+
+                const isOnline = ['available', 'composing', 'recording'].includes(status);
+
+                const info = { jid, num, name, isAdmin, status };
+
+                if (isOnline) online.push(info);
+                else if (status) offline.push(info);
             }
 
-            if (active.length === 0) {
-                return reply('No active members right now');
+            const unknown = participants.length - online.length - offline.length;
+            const mentions = online.map(u => u.jid);
+
+            let text =
+                `┏━━〔 *ONLINE MONITOR* 〕━━\n` +
+                `┃\n` +
+                `┃  ✦ Group  : ${meta.subject}\n` +
+                `┃  ✦ Total  : ${participants.length}\n` +
+                `┃  ◦ Online : ${online.length}\n` +
+                `┃  ◦ Away   : ${offline.length}\n` +
+                `┃  ◦ Hidden : ${unknown}\n` +
+                `┃\n` +
+                `┗━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+            if (online.length) {
+                text += `*✦ ONLINE (${online.length})*\n`;
+                for (const u of online) {
+                    const badge = u.isAdmin ? '❏' : '◦';
+                    const action = u.status === 'composing' ? ' ✍' : u.status === 'recording' ? ' 🎙' : '';
+                    text += `${badge} @${u.num} — ${u.name}${action}\n`;
+                }
+            } else {
+                text += `*✦ ONLINE (0)*\n`;
+                text += `_No members detected online_\n`;
+                text += `_Note: WhatsApp only shares presence with your contacts_\n`;
             }
 
-            // Build mention message
-            let mentions = active.map(a => a.jid);
-            let text = `Active Members (${active.length}):\n\n`;
-            
-            active.forEach((member, i) => {
-                text += `${i + 1}. @${member.jid.split('@')[0]} - ${member.status}\n`;
-            });
+            if (offline.length) {
+                text += `\n*◦ RECENTLY AWAY (${offline.length})*\n`;
+                for (const u of offline.slice(0, 5)) {
+                    text += `◦ ${u.name} — _${u.status}_\n`;
+                }
+                if (offline.length > 5) text += `_...and ${offline.length - 5} more_\n`;
+            }
 
-            await sock.sendMessage(from, {
-                text,
-                mentions
-            }, { quoted: msg });
+            await sock.sendMessage(m.chat, { text, mentions }, { quoted: m });
 
         } catch (err) {
-            console.error('[listactive]', err.message);
-            reply(`Error: ${err.message}`);
+            console.error('[LISTONLINE ERROR]', err.message);
+            reply(`✘ Error: ${err.message}`);
         }
     }
 };

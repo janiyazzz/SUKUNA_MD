@@ -1,86 +1,94 @@
-/**
- * List Inactive Members Command
- * Usage: .listinactive
- *
- * Tags all inactive members in the group.
- */
-
 'use strict';
 
 module.exports = {
     name: 'listinactive',
-    aliases: ['inactive', 'inactivemembers'],
-    description: 'Tag all inactive members',
-    category: 'admin',
+    aliases: ['inactive', 'dormant', 'sleepers'],
+    desc: 'List inactive/dormant members in the group',
+    category: 'Admin',
+    groupOnly: true,
+    reactions: { start: '😴', success: '📋' },
 
-    async execute({ sock, msg, from, reply, isGroup, db }) {
-        if (!isGroup) {
-            return reply('👥 This command only works in groups!');
-        }
-
+    execute: async (sock, m, { reply }) => {
         try {
-            const meta = await sock.groupMetadata(from);
+            const meta = await sock.groupMetadata(m.chat);
             const participants = meta.participants || [];
-            
-            const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
-            const now = Date.now();
+
+            if (!participants.length) return reply('✘ No participants found');
+
+            // Subscribe to presence for this group
+            try { await sock.presenceSubscribe(m.chat); } catch {}
+
+            await reply('⚉ _Analyzing inactive members... please wait_');
+            await new Promise(r => setTimeout(r, 2000));
+
             const inactive = [];
+            const userPresence = global._userPresence || new Map();
+            const now = Date.now();
+            const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
 
-            const allActivity = db.getAllUserActivity(from);
+            for (const p of participants) {
+                const jid = p.id;
+                const num = jid.split('@')[0];
+                const isAdmin = p.admin === 'admin' || p.admin === 'superadmin';
 
-            for (const participant of participants) {
-                const userJid = participant.id;
-                const activity = allActivity?.[userJid];
-                
-                let isInactive = false;
+                // Get name
+                let name = num;
+                try {
+                    const contacts = sock.store?.contacts;
+                    const contact = contacts instanceof Map
+                        ? contacts.get(jid)
+                        : contacts?.[jid];
+                    if (contact?.notify?.trim()) name = contact.notify;
+                    else if (contact?.name?.trim()) name = contact.name;
+                } catch {}
+
+                // Check presence from global set
                 let lastSeen = 0;
-
-                if (!activity) {
-                    // Never seen = inactive
-                    isInactive = true;
-                } else {
-                    if (typeof activity === 'object') {
-                        lastSeen = activity.lastSeen || 0;
-                    } else {
-                        lastSeen = activity;
-                    }
-                    
-                    // Inactive if not seen in 7+ days
-                    if (now - lastSeen > SEVEN_DAYS) {
-                        isInactive = true;
-                    }
+                const presence = userPresence.get(jid);
+                if (presence) {
+                    lastSeen = presence.timestamp;
                 }
+
+                // Consider inactive if:
+                // 1. No presence data at all
+                // 2. Last seen more than 7 days ago
+                const isInactive = !presence || (now - lastSeen > SEVEN_DAYS);
 
                 if (isInactive) {
-                    inactive.push({ jid: userJid, lastSeen });
+                    const daysSince = lastSeen ? Math.floor((now - lastSeen) / (24 * 60 * 60 * 1000)) : null;
+                    inactive.push({ jid, num, name, isAdmin, daysSince });
                 }
             }
 
-            if (inactive.length === 0) {
-                return reply('📊 No inactive members found');
+            if (!inactive.length) {
+                return reply('✦ No inactive members found — everyone is active!');
             }
 
-            // Sort by last seen (oldest first)
-            inactive.sort((a, b) => a.lastSeen - b.lastSeen);
+            // Sort by most recent first
+            inactive.sort((a, b) => (b.daysSince || 0) - (a.daysSince || 0));
 
-            // Build mention string
-            let mentions = inactive.map(a => a.jid);
-            let text = `⏸️ *Inactive Members (${inactive.length})* ⏸️\n\n`;
-            
-            inactive.forEach((member, i) => {
-                const name = member.jid.split('@')[0];
-                const lastSeenText = member.lastSeen === 0 ? 'Never' : `${Math.floor((now - member.lastSeen) / (24 * 60 * 60 * 1000))}d ago`;
-                text += `${i + 1}. @${name}\n   📍 Last: ${lastSeenText}\n`;
-            });
+            const mentions = inactive.map(u => u.jid);
+            let text =
+                `┏━━〔 *INACTIVE MONITOR* 〕━━\n` +
+                `┃\n` +
+                `┃  ✦ Total    : ${participants.length}\n` +
+                `┃  ◦ Inactive : ${inactive.length}\n` +
+                `┃\n` +
+                `┗━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
-            await sock.sendMessage(from, {
-                text,
-                mentions
-            }, { quoted: msg });
+            text += `*◦ INACTIVE (${inactive.length})*\n`;
+            for (const u of inactive.slice(0, 10)) {
+                const badge = u.isAdmin ? '❏' : '◦';
+                const timeStr = u.daysSince ? `${u.daysSince}d ago` : 'Never active';
+                text += `${badge} @${u.num} — ${timeStr}\n`;
+            }
+            if (inactive.length > 10) text += `_...and ${inactive.length - 10} more_\n`;
+
+            await sock.sendMessage(m.chat, { text, mentions }, { quoted: m });
 
         } catch (err) {
-            console.error('[listinactive]', err.message);
-            reply(`❌ Error: ${err.message}`);
+            console.error('[LISTINACTIVE ERROR]', err.message);
+            reply(`✘ Error: ${err.message}`);
         }
     }
 };

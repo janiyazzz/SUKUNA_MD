@@ -1,25 +1,29 @@
 /**
- * .story <idea> — AI writes a short story.
+ * Story AI Command
+ * Usage: .story <topic>
  */
-const { ask } = require('../../utils/smartAI');
+
+const axios = require('axios');
 
 module.exports = {
     name: 'story',
-    aliases: ['shortstory'],
-    description: 'Write a short story from an idea',
-    category: 'ai',
-    async execute({ reply, args }) {
-        if (!args.length) {
-            return reply('📖 *Story*\n\nUsage: .story <idea>\nExample: .story a robot who learns to paint');
+    description: 'Generate a short story',
+    category: 'media',
+    async execute({ sock, msg, from, reply, args }) {
+        const topic = args.join(' ');
+        if (!topic) {
+            return reply('📖 Please provide a topic for the story.\nExample: .story a brave knight');
         }
-        const idea = args.join(' ');
-        await reply('📖 *Writing...*');
-        const out = await ask({
-            system: 'You are a creative storyteller. Write an engaging short story (under 300 words) based on the idea.',
-            user: idea,
-            remember: false,
-        });
-        if (!out) return reply('❌ AI is busy right now. Try again in a moment.');
-        reply(`📖 *Story*\n\n${out}`);
-    },
+
+        try {
+            const res = await axios.get(`https://apis.prexzyvilla.site/ai/aichat?prompt=Write a creative short story about: ${encodeURIComponent(topic)}`);
+            const data = res.data;
+            const text = data.reply || data.response || data.result || '...';
+
+            reply(`📖 *Story:* \n\n${text}`);
+        } catch (err) {
+            console.error('[story]', err.message);
+            reply('❌ Story AI is currently unavailable.');
+        }
+    }
 };

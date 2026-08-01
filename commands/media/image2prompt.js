@@ -4,7 +4,7 @@
  */
 
 const axios = require("axios");
-const { isUrl } = require("../../utils/mediaFetch"); // Assuming a utility for URL check
+const { isUrl } = require("../../lib/mediaFetch"); // Assuming a utility for URL check
 
 // Placeholder for API Keys - User should set these up
 const MAGNIFIC_API_KEY = process.env.MAGNIFIC_API_KEY || "YOUR_MAGNIFIC_API_KEY";

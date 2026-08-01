@@ -4,7 +4,7 @@
  */
 
 const axios = require("axios");
-const { isUrl } = require("../../utils/mediaFetch"); // Assuming a utility for URL check
+const { isUrl } = require("../../lib/mediaFetch"); // Assuming a utility for URL check
 
 // Placeholder for API Key - User should set this up
 const REMOVEBG_API_KEY = process.env.REMOVEBG_API_KEY || "YOUR_REMOVEBG_API_KEY";

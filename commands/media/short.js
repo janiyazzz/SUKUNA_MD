@@ -4,7 +4,7 @@
  */
 
 const axios = require("axios");
-const { isUrl } = require("../../utils/mediaFetch");
+const { isUrl } = require("../../lib/mediaFetch");
 
 // Placeholder for API Key - User should set this up
 const BITLY_API_KEY = process.env.BITLY_API_KEY || "YOUR_BITLY_API_KEY";

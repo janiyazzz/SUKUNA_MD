@@ -4,7 +4,7 @@
  */
 
 const axios = require("axios");
-const { isUrl } = require("../../utils/mediaFetch");
+const { isUrl } = require("../../lib/mediaFetch");
 
 module.exports = {
     name: "unidownload",

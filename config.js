@@ -74,5 +74,17 @@ module.exports = {
         adminOnly: '🛡️ This command is only for admins!',
         groupOnly: '👥 This command can only be used in groups!',
         botAdminNeeded: '🤖 Bot needs to be admin to execute this command!'
+    },
+
+    // ============================================
+    // ANTI-BAN ENGINE v2.0
+    // ============================================
+    antiBan: {
+        enabled: true,
+        maxMessagesPerSecond: 2,
+        messageRateLimit: 500,
+        apiThrottleMs: 500,
+        autoPauseThreshold: 5,
+        autoPauseDuration: 180000
     }
 };

@@ -74,22 +74,5 @@ module.exports = {
         adminOnly: '🛡️ This command is only for admins!',
         groupOnly: '👥 This command can only be used in groups!',
         botAdminNeeded: '🤖 Bot needs to be admin to execute this command!'
-    },
-
-    // ============================================
-    // ANTI-BAN ENGINE v2.0 (NEW)
-    // ============================================
-    antiBan: {
-        enabled: true,
-        // Max messages per second (WhatsApp: ~2 max)
-        maxMessagesPerSecond: 2,
-        // Minimum gap between messages (ms)
-        messageRateLimit: 500,
-        // API throttle (ms between external calls)
-        apiThrottleMs: 500,
-        // Auto-pause after N errors in 60s
-        autoPauseThreshold: 5,
-        // How long to pause when threshold hit (ms)
-        autoPauseDuration: 180000, // 3 minutes
     }
 };
